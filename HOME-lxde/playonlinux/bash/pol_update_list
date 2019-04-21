@@ -1,0 +1,120 @@
+#!/bin/bash
+
+# Copyright (C) 2007-2010 PlayOnLinux Team
+# Copyright (C) 2009 Pâris Quentin
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA. 
+
+
+# This script calls maj_check to update POL
+export DONT_MONITOR="TRUE"
+[ "$PLAYONLINUX" = "" ] && exit 0
+source "$PLAYONLINUX/lib/sources"
+
+config_maj() # Celle ci est exécuté à chaque ligne (wget | config_maj), elle traite tout
+{
+	read totlines
+
+	# Display 10% for fetching lists, plus 90% for fetching icons
+        echo 0
+        echo -n "" > "$POL_USER_ROOT/tmp/icons_fetch_list"
+	numfetch=0
+	lines=0
+	while read line; do
+		[ "$line" = "" ] && break
+		IFS="/" read file content download_icon testing nocd free <<< "$line"
+
+		echo "$content~$testing~$nocd~$free" >> "$file"
+		echo "$content~$testing~$nocd~$free" >> "search"
+		if [ "$download_icon" = "1" -a ! -e "$POL_USER_ROOT/configurations/icones/$content" ]; then
+			echo "$SITE/V2_data/icones/$content" >> "$POL_USER_ROOT/tmp/icons_fetch_list"
+			numfetch=$(( numfetch + 1 ))
+		fi
+		lines=$(( lines + 1 ))
+		echo $(( lines*10/totlines ))
+	done
+
+	if [ $numfetch -gt 0 ]; then
+		echo 10
+		i=0
+	        cd "$POL_USER_ROOT/configurations/icones"
+		${POL_WGET/-q} -nv -nd -i "$POL_USER_ROOT/tmp/icons_fetch_list" 2>&1 |\
+		sed -ue '/URL:/!d; s/^.*-> "\(.*\)".*$/\1/'|\
+		while read content; do
+			[ -e "$content" -a ! -s "$content" ] && rm "$content"
+			i=$(( i + 1 ))
+			echo $(( 10 + i*90/numfetch ))
+		done
+	else
+		echo 100
+	fi
+	rm "$POL_USER_ROOT/tmp/icons_fetch_list" 2>/dev/null
+}
+get_packages_icons()
+{
+	while read line; do
+		content="$(echo "$line" | cut -d ":" -f 1)"
+		if [ ! -e "$POL_USER_ROOT/configurations/icones/$content" ]; then
+			echo "$SITE/V2_data/icones/$content"
+		fi
+	done > "$POL_USER_ROOT/tmp/icons_fetch_list2"
+        cd "$POL_USER_ROOT/configurations/icones"
+	${POL_WGET/-q} -nv -nd -i "$POL_USER_ROOT/tmp/icons_fetch_list2" 2>&1 |\
+	sed -ue '/URL:/!d; s/^.*-> "\(.*\)".*$/\1/'|\
+	while read content; do
+		[ -e "$content" -a ! -s "$content" ] && rm "$content"
+	done
+	rm "$POL_USER_ROOT/tmp/icons_fetch_list2" 2>/dev/null
+}
+maj_check ()
+{
+	#clean_tmp
+	WEB_TIMESTAMP="$($POL_WGET "$SITE/update_mark.txt" -O- 2> /dev/null)"
+	LAST_TIMESTAMP="$(POL_Config_Read LAST_TIMESTAMP)"
+
+	if $POL_WGET "$SITE/V4_data/repository/get_packages.php" -O- > "$REPERTOIRE/configurations/POL_Functions"; then
+		 mv "$REPERTOIRE/configurations/POL_Functions" "$REPERTOIRE/configurations/listes/POL_Functions"
+		 cat "$REPERTOIRE/configurations/listes/POL_Functions" | grep ':1$' | get_packages_icons
+	fi
+	# Gecko
+	$POL_WGET "$GECKO_SITE/gecko.lst" -O- > "$REPERTOIRE/tmp/gecko.lst" && mv "$REPERTOIRE/tmp/gecko.lst" "$REPERTOIRE/configurations/listes/gecko.lst"
+	# Mono
+	$POL_WGET "$MONO_SITE/mono.lst" -O- > "$REPERTOIRE/tmp/mono.lst" && mv "$REPERTOIRE/tmp/mono.lst" "$REPERTOIRE/configurations/listes/mono.lst"
+	if [ ! "$WEB_TIMESTAMP" = "" ] && [ ! "$WEB_TIMESTAMP" = "$LAST_TIMESTAMP" ] # On évite les mises à jours inutiles
+	then
+		POL_Debug_Message "Web version : $WEB_TIMESTAMP"
+		POL_Debug_Message "Current local version : $LAST_TIMESTAMP"
+		POL_Debug_Message "Updating list"
+		mkdir -p "$REPERTOIRE/configurations/listes/"
+		cd "$REPERTOIRE/configurations/listes"
+		rm 0 1 2 3 4 5 6 7 8 9 search 2> /dev/null
+		touch 0 1 2 3 4 5 6 7 8 9 search
+		
+		echo 0
+		if [ "$POL_OS" = "Linux" ]
+		then
+			$POL_WGET "$SITE/V4_data/repository/get_list_v4.php" -O- | config_maj
+			$POL_WGET "$SITE/V4_data/repository/get_md5_list.php?playonlinux=1" -O- > md5sums
+		else
+			$POL_WGET "$SITE/V4_data/repository/get_list_v4.php?playonmac=1" -O- | config_maj
+			$POL_WGET "$SITE/V4_data/repository/get_md5_list.php?playonmac=1" -O- > md5sums
+		fi
+		POL_Config_Write LAST_TIMESTAMP "$WEB_TIMESTAMP"
+	else
+		POL_Debug_Message "List is up to date"
+	fi
+}
+
+maj_check

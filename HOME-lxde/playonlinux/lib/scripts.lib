@@ -1,0 +1,998 @@
+#!/bin/bash
+
+# Copyright (C) 2007-2011 PlayOnLinux Team
+# Copyright (C) 2007-2011 Pâris Quentin
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA. 
+
+# scripts.lib
+# -----------
+#
+# This lib contains useful tools for scriptors
+
+POL_Shortcut_InsertBeforeWine ()
+{
+	# Insert a command into a script just before running wine
+	# Usage: POL_Shortcut_InsertBeforeWine [Application] [Line to insert]
+	POL_Debug_Message "Inserting before POL_Wine : $2" 
+	Application="$1"
+	CommandsToInsert="$2"
+
+	COMMANDS="${CommandsToInsert}" perl -ni -e '
+            if(!$done && /^POL_Wine /) {
+                print "$ENV{COMMANDS}\n";
+                $done=1;
+            }
+            print;'   "$REPERTOIRE/shortcuts/${Application}"
+}
+
+POL_Open()
+{
+	# Extended xdg-open function, works for mac
+	# Usage : POL_Open whatever you want
+
+	POL_Debug_Message "Opening: $@"
+	[ "$POL_OS" == "Mac" ] && open "$@"
+	[ "$POL_OS" == "Linux" ] && xdg-open "$@"
+}
+POL_Browser ()
+{
+	# Open default's user browser
+	# Usage : POL_Brower [URL]
+	POL_Open "$@"
+}
+POL_System_TmpCreate()
+{
+	# Create a temporary directory for a script
+	# Usage: POL_System_TmpCreate [tmp_name]
+	
+	[ "$1" = "" ] && POL_Debug_Fatal "TmpName not defined !"
+	mkdir -p "$POL_USER_ROOT/tmp/$1"
+	export POL_System_TmpDir="$POL_USER_ROOT/tmp/$1"
+	export POL_System_TmpName="$1"
+}
+POL_System_TmpDelete()
+{
+	# Delete the temporary directory created before
+	# Usage: POL_System_TmpDelete
+	
+	[ ! "$POL_System_TmpName" = "" ] && rm -rf "$POL_USER_ROOT/tmp/$POL_System_TmpName" || POL_Debug_Warning "POL_System_TmpName is not defined !"
+}
+POL_System_SetArch()
+{
+	# Set the architecture to use for the current script
+	# Usage: POL_System_SetArch (auto|x86|amd64)
+	# If amd64 is specified and not supported, the script will end
+
+	# $1 = Auto, x86, amd64
+	# $2 = detected, if the result of an automatic selection
+
+	if [ ! "$1" == "x86" ] && [ ! "$1" == "amd64" ]
+	then
+		[ "$AMD64_COMPATIBLE" == "True" ] && export POL_ARCH="amd64" || export POL_ARCH="x86"
+	fi
+	if [ "$1" == "x86" ]
+	then
+		export POL_ARCH="x86"
+	fi
+	if [ "$1" == "amd64" ]
+	then
+		[ "$AMD64_COMPATIBLE" == "True" ] && export POL_ARCH="amd64" || POL_Debug_Fatal "amd64 is not supported by your system"
+	fi
+
+	[ "$2" = "detected" ] || POL_USER_ARCH="$POL_ARCH"
+
+	POL_Debug_Message "POL_ARCH set to $POL_ARCH"
+}
+POL_System_HomeSpaceLeft()
+{
+	# Return the space left in the home partition
+	df -P -k "$HOME" | tail -n1 | awk '{print $4}'
+}
+POL_System_UserRootSpaceLeft()
+{
+	# Return the space left in the home partition
+	df -P -k "$POL_USER_ROOT" | tail -n1 | awk '{print $4}'
+}
+POL_System_EnoughSpace()
+{
+	# Set exitcode to 0 if we have enough space, 1 otherwise
+	# Usage POL_System_EnoughSpace [ Space required ]
+	[ "$1" -le "$(POL_System_UserRootSpaceLeft)" ]
+}
+POL_Shortcut_GetPrefix()
+{
+	# Get a prefixname from a shortcut
+	# Usage: POL_Shortcut_GetPrefix [Shortcut]
+	
+	[ "$1" = "" ] && POL_Debug_Error "No shortcut specified"
+	fichier="$REPERTOIRE/shortcuts/$1"
+	if [ -e "$fichier" ]
+	then
+		fichier="$(cat "$fichier" | grep '^export WINEPREFIX' | tail -n 1 | sed s/'\/\//\/'/)"
+		fichier="${fichier/"$POL_USER_ROOT"/""}"
+		fichier="$(printf "$fichier" | cut -d "/" -f2)"
+	fi
+	printf "$fichier" | tr -d \"
+}
+
+
+POL_GetLocalIcon()
+{
+	# Get a local icon and add it into playonlinux
+	# Usage: POL_GetLocalIcon [PlayOnLinux's shortcut] [icon name]
+	
+	convert "$HOME/.local/share/icons/$2" -geometry 32X32 "$REPERTOIRE/icones/32/$1"
+	convert "$HOME/.local/share/icons/$2" "$REPERTOIRE/icones/full_size/$1"
+}
+
+POL_ExtractIcon()
+{
+	# Extract the icon of a .exe or .ico file
+	# Usage: POL_ExtractIcon [.exe file] [output image file]
+
+	mkdir -p "$REPERTOIRE/tmp/win32Icon"
+	wrestool -x -t14 "$1" &> "$REPERTOIRE/tmp/win32Icon/icons-brut"
+
+        (cd "$REPERTOIRE/tmp/win32Icon"
+
+	icotool -x "icons-brut" -o "$REPERTOIRE/tmp/win32Icon/"
+
+	# Is there an existing 32x32 icon?
+	find . -name "*32x32x32.png" > icons-list
+	find . -name "*32x32x24.png" >> icons-list
+	find . -name "*32x32x16.png" >> icons-list
+	find . -name "*32x32x8.png" >> icons-list
+	find . -name "*32x32x4.png" >> icons-list
+
+	ICON_FILE=$(head -n 1 "icons-list")
+
+	if [ -n "$ICON_FILE" -a -s "$ICON_FILE" ]; then
+		shift
+		for target in "$@"; do
+			cp "$ICON_FILE" "$target" || POL_Debug_Warning "Icon was not extracted"
+		done
+	else
+		# Otherwise, find the smallest icon over 32x32 and downsize it
+		find . -name "*48x48x32.png" > icons-list
+		find . -name "*48x48x24.png" >> icons-list
+		find . -name "*48x48x16.png" >> icons-list
+		find . -name "*48x48x8.png" >> icons-list
+		find . -name "*48x48x4.png" >> icons-list
+
+		find . -name "*64x64x32.png" >> icons-list
+		find . -name "*64x64x24.png" >> icons-list
+		find . -name "*64x64x16.png" >> icons-list
+		find . -name "*64x64x8.png" >> icons-list
+		find . -name "*64x64x4.png" >> icons-list
+
+		find . -name "*96x96x32.png" >> icons-list
+		find . -name "*96x96x24.png" >> icons-list
+		find . -name "*96x96x16.png" >> icons-list
+		find . -name "*96x96x8.png" >> icons-list
+		find . -name "*96x96x4.png" >> icons-list
+
+		find . -name "*128x128x32.png" >> icons-list
+		find . -name "*128x128x24.png" >> icons-list
+		find . -name "*128x128x16.png" >> icons-list
+		find . -name "*128x128x8.png" >> icons-list
+		find . -name "*128x128x4.png" >> icons-list
+
+		find . -name "*256x256x32.png" >> icons-list
+		find . -name "*256x256x24.png" >> icons-list
+		find . -name "*256x256x16.png" >> icons-list
+		find . -name "*256x256x8.png" >> icons-list
+		find . -name "*256x256x4.png" >> icons-list
+
+		ICON_FILE=$(head -n 1 "icons-list")
+
+		if [ -n "$ICON_FILE" -a -s "$ICON_FILE" ]; then
+			convert "$ICON_FILE" -resize 32x32 "$POL_USER_ROOT/tmp/tmp_icon.png" || POL_Debug_Warning "Icon was not extracted"
+			shift
+			for target in "$@"; do
+				cp "$POL_USER_ROOT/tmp/tmp_icon.png" "$target" || POL_Debug_Warning "Icon was not extracted"
+			done
+		fi
+	fi
+	)
+	rm -r "$POL_USER_ROOT/tmp/win32Icon"
+}
+POL_ExtractBiggestIcon()
+{
+	# Extract the biggest icon of a .exe or .ico file
+	# Usage: POL_ExtractCustomIcon [.exe file] [output image file] [size]
+
+	mkdir -p "$REPERTOIRE/tmp/win32Icon"
+	wrestool -x -t14 "$1" &> "$REPERTOIRE/tmp/win32Icon/icons-brut"
+
+        (cd "$REPERTOIRE/tmp/win32Icon"
+
+	icotool -x "icons-brut" -o "$REPERTOIRE/tmp/win32Icon/"
+
+	find . -name "*256x256x32.png" > icons-list
+	find . -name "*256x256x24.png" >> icons-list
+	find . -name "*256x256x16.png" >> icons-list
+	find . -name "*256x256x8.png" >> icons-list
+	find . -name "*256x256x4.png" >> icons-list
+
+	find . -name "*128x128x32.png" >> icons-list
+	find . -name "*128x128x24.png" >> icons-list
+	find . -name "*128x128x16.png" >> icons-list
+	find . -name "*128x128x8.png" >> icons-list
+	find . -name "*128x128x4.png" >> icons-list
+
+	find . -name "*96x96x32.png" >> icons-list
+	find . -name "*96x96x24.png" >> icons-list
+	find . -name "*96x96x16.png" >> icons-list
+	find . -name "*96x96x8.png" >> icons-list
+	find . -name "*96x96x4.png" >> icons-list
+
+	find . -name "*64x64x32.png" >> icons-list
+	find . -name "*64x64x24.png" >> icons-list
+	find . -name "*64x64x16.png" >> icons-list
+	find . -name "*64x64x8.png" >> icons-list
+	find . -name "*64x64x4.png" >> icons-list
+
+	find . -name "*48x48x32.png" >> icons-list
+	find . -name "*48x48x24.png" >> icons-list
+	find . -name "*48x48x16.png" >> icons-list
+	find . -name "*48x48x8.png" >> icons-list
+	find . -name "*48x48x4.png" >> icons-list
+
+	find . -name "*36x36x32.png" >> icons-list
+	find . -name "*36x36x24.png" >> icons-list
+	find . -name "*36x36x16.png" >> icons-list
+	find . -name "*36x36x8.png" >> icons-list
+	find . -name "*36x36x4.png" >> icons-list
+	
+	find . -name "*32x32x32.png" >> icons-list
+	find . -name "*32x32x24.png" >> icons-list
+	find . -name "*32x32x16.png" >> icons-list
+	find . -name "*32x32x8.png" >> icons-list
+	find . -name "*32x32x4.png" >> icons-list
+
+	ICON_FILE=$(head -n 1 "icons-list")
+	if [ -n "$ICON_FILE" -a -s "$ICON_FILE" ]; then
+		shift
+		for target in "$@"; do
+			cp "$ICON_FILE" "$target" || POL_Debug_Warning "Icon was not extracted"
+		done
+	fi
+	)
+	rm -r "$REPERTOIRE/tmp/win32Icon"
+}
+find_binary ()
+{
+	## Find executable directory
+	cd "$WINEPREFIX" || POL_Debug_Fatal "Prefixe $WINEPREFIX does not exists"
+	cd drive_c || POL_Debug_Fatal "drive_c folder does not exists"
+
+	binary_path=""
+	if [ "$(echo "$1" | grep "/")" = "" ]; then # Binaire
+		binary_path="$(find ./ -name windows -prune -o -iname "$1" -a -type f -print | tail -n 1)"
+		[ -z "$binary_path" ] && binary_path="$(find ./windows/ -iname "$1" -a -type f -print | tail -n 1)"
+	else # Chemin
+		[ -e "./$1" ] && binary_path="./$1"
+	fi
+	echo "$binary_path"
+}
+POL_Shortcut()
+{
+	# Make a shortcut
+	# Usage: POL_Shortcut [binary] [shortcut name] [playonlinux website icon] [argument] [categories]
+	# If playonlinux website icon is not specified, playonlinux will try to extract it from the program
+	# Possibly to use a path instead of the executable.
+
+	Binaire="$1"
+	SpecialArg="$4"
+	Categories="$5"
+	if [ "$2" = "" ]
+	then
+		NOMICONE_="$1"
+	else
+		NOMICONE_="$2"
+	fi
+	
+	mkdir -p "$REPERTOIRE/icones/32"
+	mkdir -p "$REPERTOIRE/icones/full_size"
+	
+	ICON_WEB_NAME="$3"
+	ICON_OK=0
+
+        binary_path="$(find_binary "$Binaire")"
+	binary_dir="$(dirname "$binary_path")"
+	Binaire="$(basename "$binary_path")"
+	
+	[ "$binary_dir" = "" ] && POL_Debug_Fatal "Can't find $Binaire"
+
+	if [ -n "$ICON_WEB_NAME" ]; then
+		if [ ! "$OFFLINE" = "1" ]; then # On peut le télécharger...
+			$POL_WGET "$SITE/icones/$ICON_WEB_NAME" -O- > "$REPERTOIRE/icones/full_size/$NOMICONE_" || rm "$REPERTOIRE/icones/full_size/$NOMICONE_"  # On prend l'icone full size
+		fi
+		
+		if [ -f "$REPERTOIRE/icones/full_size/$NOMICONE_" ]; then
+			convert -resize 32 "$REPERTOIRE/icones/full_size/$NOMICONE_" "$REPERTOIRE/icones/32/$NOMICONE_" # On fabrique l'icone 32*32
+			ICON_OK=1
+		fi
+	elif [ "$ICON_OK" -ne 1 ]; then # Pas d'incone sur le web => Création à partir de l'exe...	
+		POL_ExtractIcon "$WINEPREFIX/drive_c/$binary_dir/$Binaire" "$REPERTOIRE/icones/32/$NOMICONE_"
+		POL_ExtractBiggestIcon "$WINEPREFIX/drive_c/$binary_dir/$Binaire" "$REPERTOIRE/icones/full_size/$NOMICONE_"
+	fi
+
+	if [ "$Binaire" = "" ]; then
+		BINARY="$1"
+		POL_Debug_Error "$(eval_gettext 'Binary not found: $BINARY\nHave you installed the program to the default location?')"
+	else
+		## We generate shortcut
+		(echo "#!/bin/bash"
+		echo "[ \"\$PLAYONLINUX\" = \"\" ] && exit 0"
+		echo "source \"\$PLAYONLINUX/lib/sources\""
+		echo "export WINEPREFIX=\"$WINEPREFIX\""
+		echo "export WINEDEBUG=\"-all\""
+		[ -n "$LOGTITLE" ] && echo "#POL_Log=$LOGTITLE"
+		[ -n "$SCRIPTID" ] && echo "#ScriptID=$SCRIPTID"
+		echo "cd \"$WINEPREFIX/drive_c/$binary_dir\""
+		echo "POL_Wine \"$Binaire\" $SpecialArg \"\$@\"") > "$REPERTOIRE/shortcuts/$NOMICONE_"
+		chmod +x "$REPERTOIRE/shortcuts/$NOMICONE_"
+
+		if [ -f "$REPERTOIRE/icones/full_size/$NOMICONE_" ]; then # L'icone existe...
+			iconPath="$REPERTOIRE/icones/full_size/$NOMICONE_"
+		else
+			iconPath="$PLAYONLINUX/etc/playonlinux.png"
+		fi
+
+		# Menus
+		if [ ! "$(POL_Config_Read NO_MENU_ICON)" = "TRUE" ]; then
+			# Do nothing on Mac OS
+			if [ -n "$Categories" -a "$POL_OS" = "Linux" ]; then
+				LOCALAPPS="$HOME/.local/share/applications"
+				generer_icone "$iconPath" "$NOMICONE_" "$LOCALAPPS" "$PLAYONLINUX/playonlinux --run \"$NOMICONE_\"" "$Binaire" "$Categories" "playonlinux-"
+			fi
+		fi
+
+		# Desktop
+		if [ ! "$(POL_Config_Read NO_DESKTOP_ICON)" = "TRUE" ]; then
+			if [ "$POL_OS" = "Mac" ]; then
+				POL_SetupWindow_AutoApp "$NOMICONE_"
+			else
+
+	                        generer_icone "$iconPath" "$NOMICONE_" "$DESKTOP" "$PLAYONLINUX/playonlinux --run \"$NOMICONE_\"" "$Binaire" "$Categories"
+			fi
+		fi
+	fi
+	POL_Debug_Message "Shortcut created: $Binaire $NOMICONE_"
+}
+
+POL_Shortcut_QuietDebug()
+{
+	# Disable "crash" message on exitcode != 0 unless in debug mode
+	# Usage: POL_Shortcut_QuietDebug "shortcutname"
+
+	echo '[ "$WINEDEBUG" = "-all" ] && exit 0' >> "$REPERTOIRE/shortcuts/$1"
+}
+
+POL_Call()
+{
+	# Call a function in PlayOnLinux website
+	# Usage: POL_Call [function name]
+
+	POL_Debug_Message "Calling $1"
+	if [ ! "$1" = "" ]
+	then
+		OLD_PC_DIR="$PWD"
+		cd "$REPERTOIRE/tmp/"
+		if [ "$(POL_Config_Read "ALLOW_FUNCTION_OVERRIDES")" = "TRUE" -a -e "$POL_USER_ROOT/configurations/function_overrides/$1" ]; then
+			cp "$POL_USER_ROOT/configurations/function_overrides/$1" .
+			if [ -z "$NOBUGREPORT" ]; then
+				NOBUGREPORT="TRUE"
+				POL_SetupWindow_message "$(eval_gettext 'Function override detected, disabling bug reporting')" "$TITLE"
+			fi
+			POL_Debug_Message "----- Starting function $1 (OVERRIDED) -----"
+			POL_Debug_LogToPrefix "----- Starting function $1 (OVERRIDED) -----"
+			source "$@"
+			exitcode="$?"
+			POL_Debug_Message "----- Ending function $1 (OVERRIDED) -----"
+			POL_Debug_LogToPrefix "----- Ending function $1 (OVERRIDED) -----"
+		else
+			$POL_WGET "$SITE/V4_data/repository/get_file.php?version=playonlinux-$VERSION&id=$1" -O- > "$1"
+
+			polMd5="$(POL_MD5_file "$1")"
+			if [ "$polMd5" = "68b329da9893e34099c7d8ad5cb9c940" -o "$polMd5" = "0f1b63a74ab217a19270be0df9e0590d" ] # Empty file
+			then
+				POL_Debug_Error "Function $1 does not exist!"
+				exitcode="1"
+			else
+				POL_Debug_Message "----- Starting function $1 -----"
+				POL_Debug_LogToPrefix "----- Starting function $1 -----"
+				POL_Source "$@"
+				exitcode="$?"
+				POL_Debug_Message "----- Ending function $1 -----"
+				POL_Debug_LogToPrefix "----- Ending function $1 -----"
+			fi
+		fi
+		cd "$OLD_PC_DIR"
+	fi
+	return "$exitcode"
+}
+POL_Call_list ()
+{
+	# Make a list so that the user can choose functions to install
+	# Usage: POL_Call_List
+	
+	[ "$WINEPREFIX" == "" ] && POL_Debug_Fatal "POL_Call_list : WINEPREFIX is not set"
+        POL_Wine_AutoSetVersionEnv
+	wineserver -k
+	ITEMS=$($POL_WGET $SITE/V4_data/repository/getf.php -O-)
+	POL_SetupWindow_checkbox_list "$(eval_gettext "Please make your choice")" "$APPLICATION_TITLE" "$ITEMS" "/"
+ 
+	old="$IFS"
+	IFS=/
+	set "$APP_ANSWER"
+ 
+	for i in $*
+	do
+		POL_Debug_Message "POL_Call_list is calling $i"
+		IFS="$old"
+		POL_Call "$i"
+		IFS=/
+	done
+	IFS="$old"
+}
+
+POL_Tools_GenID()
+{
+	# Generate a random string
+	# Usage: POL_Tools_GenID
+	
+	N_LETTRES="$1"
+
+	if [ "$1" != "" ]
+	then
+	N_LETTRES=$1
+	fi
+	ALPHA='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890'
+
+	MOT=""
+	i=0
+	while ((i < $N_LETTRES));
+	do
+	CHIFFRE=$(( $RANDOM % ${#ALPHA}));
+	printf ${ALPHA:$CHIFFRE:1};
+	(( i=i+1 ))
+	done
+}
+POL_Download ()
+{
+	# Download a file and place it in the current directory
+	# Usage: POL_Download [URL] [MD5]
+	
+	POL_Debug_Message "Downloading $1"
+
+	local URL="$1"
+	local FICHIER="${URL##*/}"
+	local i
+	[ "$3" ] && i="$3" || i=1
+	if [ "$i" = "5" ]; then
+		POL_Debug_Fatal "Unable to download $1 after 5 attemps"
+		exit
+	fi
+	
+
+	if [ "$URL" = "" ]
+	then
+		POL_Debug_Error "POL_Download - URL is missing !"
+	else
+		neededSpace="$(POL_Download_GetSize "$URL")"
+		if [ "$neededSpace" ]; then
+			let neededSpace=neededSpace/1024
+			POL_System_EnoughSpace "$neededSpace" || POL_Debug_Error "$(eval_gettext 'No enough space to download:\n$URL ($neededSpace KB)')"
+		fi
+		POL_SetupWindow_download "$(eval_gettext 'Please wait while $APPLICATION_TITLE is downloading:')\n$FICHIER" "$TITLE" "$URL" "$PWD/$FICHIER"
+                if [ "$Result" = "Fail" ]; then
+			POL_SetupWindow_question "$(eval_gettext 'An error happened during download.')\n\n$(eval_gettext 'Do you want to retry?')"
+			if [ "$APP_ANSWER" = "FALSE" ]; then
+				POL_Debug_Error "POL_Download - error during download! ($i attempt)"
+			else
+				POL_Download "$1" "$2" "$(( i + 1 ))"
+			fi
+                elif [ "$2" = "" ]
+		then
+			POL_Debug_Warning "POL_Download - MD5 is missing!"
+		elif [ "$2" = "NO_MD5" ]
+		then
+			POL_Debug_Message "Skipping MD5 checksum control"
+		else
+			local LOCAL_MD5="$(POL_MD5_file "$FICHIER")"
+			if [ "$2" = "$LOCAL_MD5" ]
+			then
+				POL_Debug_Message "Download MD5 matches"
+			else
+				local SERVER_MD5="$2"
+				POL_SetupWindow_question "$(eval_gettext 'Error ! Files mismatch\n\nLocal : $LOCAL_MD5\nServer : $SERVER_MD5')\n\n$(eval_gettext 'Do you want to retry?')"
+				if [ "$APP_ANSWER" = "TRUE" ]; then
+					POL_Download "$1" "$2" "$(( i + 1 ))"
+				else
+					POL_Debug_Error "POL_Download - MD5 sum mismatch ! ($i attempt)"
+				fi
+			fi
+		fi
+	fi
+}
+POL_Download_Resource ()
+{
+	# Download a file and place it in the resource directory (if it does not exist)
+	# Usage: POL_Download_Resource [URL] [MD5] (Folder)
+
+	POL_Debug_Message "Downloading resource $1"
+	# 1 - URL
+	# 2 - (MD5 SUM)
+	# 3 - (Subfolder)
+	# 4 - (retry count)
+	local URL="$1"
+	local FICHIER="${URL##*/}"
+	local i
+	[ "$4" ] && i="$4" || i=1
+	mkdir -p "$POL_USER_ROOT/ressources/$3"
+	cd "$POL_USER_ROOT/ressources/$3"
+	if [ -e "$FICHIER" ] && [ "$(POL_MD5_file "$FICHIER")" = "$2" ]
+	then
+		POL_Debug_Message "Resource already present"
+	else
+		WTCACHE=""
+		[ -d "$HOME/.cache/winetricks" ] && WTCACHE="$(find $HOME/.cache/winetricks -type f -a -iname "$FICHIER" | tail -n 1)"
+		if [ -n "$WTCACHE" -a "$(POL_MD5_file "$WTCACHE")" = "$2" ]
+		then
+			ln "$WTCACHE" "$FICHIER" || cp "$WTCACHE" "$FICHIER"
+			POL_Debug_Message "Resource found in winetricks cache"
+		elif [ "$URL" = "" ]
+		then
+			POL_Debug_Error "POL_Download - URL is missing !"
+		else
+			neededSpace="$(POL_Download_GetSize "$URL")"
+			if [ "$neededSpace" ]; then
+				let neededSpace=neededSpace/1024
+				POL_System_EnoughSpace "$neededSpace" || POL_Debug_Error "$(eval_gettext 'No enough space to download:\n$URL ($neededSpace KB)')"
+			fi
+			[ -e "$FICHIER" ] && rm "$FICHIER"
+			POL_SetupWindow_download "$(eval_gettext "Please wait while $APPLICATION_TITLE is downloading:") $FICHIER" "$TITLE" "$URL"
+			if [ "$Result" = "Fail" ]; then
+				POL_SetupWindow_question "$(eval_gettext 'An error happened during download.')\n\n$(eval_gettext 'Do you want to retry?')"
+				if [ "$APP_ANSWER" = "FALSE" ]; then
+					POL_Debug_Error "POL_Download - error during download! ($i attempt)"
+				else
+					POL_Download_Resource "$1" "$2" "$3" "$(( i + 1))"
+				fi
+			elif [ "$2" = "" ]
+			then
+				POL_Debug_Warning "POL_Download - MD5 is missing !"
+			else
+				local LOCAL_MD5="$(POL_MD5_file "$FICHIER")"
+				if [ "$2" = "$LOCAL_MD5" ]
+				then
+					POL_Debug_Message "Download MD5 matches"
+				else
+					local SERVER_MD5="$2"
+					POL_SetupWindow_question "$(eval_gettext 'Error ! Files mismatch\n\nLocal : $LOCAL_MD5\nServer : $SERVER_MD5')\n\n$(eval_gettext 'Do you want to retry?')"
+					if [ "$APP_ANSWER" = "FALSE" ]; then
+						POL_Debug_Error "POL_Download_Resource - MD5 sum mismatch ! ($i attempt)"
+					else
+						POL_Download_Resource "$1" "$2" "$3" "$(( i + 1 ))"
+					fi
+				fi
+			fi
+		fi
+	fi
+}
+POL_Download_GetSize()
+{
+	# Get the size of a distant file
+	# Usage: POL_Download_GetSize [URL]
+	wget "$1" --spider --server-response -O - 2>&1 | sed -ne '/Content-Length/{s/.*: //;p}'	| tail -n1
+}
+POL_MD5 ()
+{
+	# Give the md5 sum of a string
+	# Usage: POL_MD5 <string>
+	
+	if [ "$POL_OS" == "Mac" ]
+	then
+		printf "$1" | md5
+	fi
+	if [ "$POL_OS" == "Linux" ]
+	then
+		printf "$1" | md5sum | awk '{print $1}'
+	fi
+}
+POL_MD5_file ()
+{
+	# Give the md5 sum of a file
+	# Usage: POL_MD5_file <file>
+	if [ "$POL_OS" == "Mac" ]
+	then
+		cat "$1" | md5
+	fi
+	if [ "$POL_OS" == "Linux" ]
+	then
+		cat "$1" | md5sum | awk '{print $1}'
+	fi
+}
+POL_base64()
+{
+	[ "$POL_OS" = "Linux" ] && base64
+	[ "$POL_OS" = "Mac" ] && openssl base64
+}
+POL_unbase64()
+{
+	[ "$POL_OS" = "Linux" ] && base64 -d
+	[ "$POL_OS" = "Mac" ] && openssl base64 -d
+}
+
+POL_System_unzip ()
+{
+	POL_Debug_Message "Starting unzip $@"
+	unzip "$@" || POL_Debug_Fatal "POL_System_unzip failed with error $?!"
+	POL_Debug_Message "unzip ok"
+}
+POL_System_7z ()
+{
+	POL_Debug_Message "Starting 7z $@"
+	7z "$@" || POL_Debug_Fatal "POL_System_7z failed with error $?!"
+	POL_Debug_Message "7z ok"
+}
+POL_System_tar ()
+{
+	POL_Debug_Message "Starting tar $@"
+	tar "$@" || POL_Debug_Fatal "POL_System_tar failed with error $?!"
+	POL_Debug_Message "tar ok"
+}
+POL_System_cabextract ()
+{
+	POL_Debug_Message "Starting cabextract $@"
+	cabextract "$@" || POL_Debug_Fatal "POL_System_cabextract failed with error $?!"
+	POL_Debug_Message "cabextract ok"
+}
+POL_System_unrar ()
+{
+	POL_Debug_Message "Starting unrar $@"
+	unrar "$@" || POL_Debug_Fatal "POL_System_unrar failed with error $?!"
+	POL_Debug_Message "unrar ok"
+}
+POL_System_ExtractSingleFile ()
+{
+	# This function has been written by hifi
+	# Extract a single file from an archive, with a progressbar
+	# Usage: POL_System_ExtractSingleFile <archive> <file> <destination>
+	
+    local archive="$1"
+    local file="$2"
+    local dest="$3"
+
+    local archivename=`basename "$archive"`
+    local filename=`basename "$file"`
+    local szpid
+    local szip=`which 7z`
+
+    POL_Debug_Message "Extracting single file : \"$archive\", \"$file\", \"$dest\""
+
+    if [ "$szip" == "" ]; then
+        POL_Debug_Fatal "$(eval_gettext '7z not installed, please check that you have 7zip installed and try again')"
+        return 1
+    fi
+
+    local size=`"$szip" l -slt "$archive" "$file" | grep '^Size' | cut -d' ' -f3`
+
+    if [ "$size" == "" ]; then
+        POL_Debug_Error "$(eval_gettext 'Failed to locate ${dest} from ${archive}')"
+        return 1
+    fi
+
+    POL_SetupWindow_pulsebar "$(eval_gettext 'Extracting ${filename} from ${archivename}')" "$TITLE"
+
+    rm -f "$dest"
+    "$szip" e -so "$archive" "$file" 2>/dev/null 1>"$dest" & szpid=$!
+
+    while kill -0 $szpid 2>/dev/null; do
+        #POL_SetupWindow_pulse $(((`stat -c%s "$dest"` * 100) / "$size")) # Does not work for Mac OS
+		sleep 1
+		POL_SetupWindow_pulse $(( (`ls -l "$dest" | awk '{print $5}'` * 100) / $size ))
+    done
+
+    POL_SetupWindow_pulse 100
+
+    #if [ `stat -c%s "$dest"` != "$size" ]; then
+	if [ `ls -l "$dest" | awk '{print $5}'` != "$size" ]; then
+        POL_Debug_Error "$(eval_gettext 'Extracted file size does not match!')"
+        return 1
+    fi
+
+    return 0
+}
+POL_System_cpmv ()
+{
+	# Extract a single file with a progressbar
+	# Usage: POL_System_cp <file> <destination>
+	
+    local op="$1"
+    shift
+    local file="$1"
+    local dest="$2"
+
+    local filename=`basename "$file"`
+	#local szpid
+    case "$op" in
+        cp)
+            POL_Debug_Message "Copying single file : \"$archive\", \"$file\", \"$dest\""
+            ;;
+        mv)
+            POL_Debug_Message "Moving single file : \"$archive\", \"$file\", \"$dest\""
+            ;;
+        *)
+            POL_Debug_Fatal "POL_System_cpmv: bad operation `$op`"
+    esac
+
+	local size="$(ls -l $file | awk '{print $5}')"
+
+    POL_SetupWindow_pulsebar "$(eval_gettext 'Copying ${filename}')" "$TITLE"
+
+    rm -f "$dest"
+    "$op" "$file" "$dest" 2>/dev/null & szpid=$!
+
+    while kill -0 $szpid 2>/dev/null; do
+		sleep 0.3
+		POL_SetupWindow_pulse $(((`ls -l "$dest" | awk '{print $5}'` * 100) / $size))
+    done
+
+    POL_SetupWindow_pulse 100
+
+    if [ "`ls -l "$dest" | awk '{print $5}'`" != "$size" ]; then
+        POL_Debug_Error "$(eval_gettext 'File size does not match!')"
+        return 1
+    fi
+
+    return 0
+}
+POL_System_cp ()
+{
+    POL_System_cpmv "cp" "$@"
+}
+POL_System_mv ()
+{
+    POL_System_cpmv "mv" "$@"
+}
+POL_System_wget ()
+{
+	# Wget with a progressbar
+	# Usage: Same than wget except that URL must be the first parameter, the title of the file is the second parameter
+
+	url="$1"
+	POL_Debug_Message "Downloading $1 with wget"
+	shift
+	FICHIER="$1"
+	shift
+
+	POL_SetupWindow_pulsebar "$(eval_gettext 'Please wait while $APPLICATION_TITLE is downloading:')\n$FICHIER" "$TITLE"
+
+	prev=0
+	ellipsis=''
+	wgetlog="$POL_USER_ROOT/tmp/wget$$.output"
+        set -o pipefail
+	${POL_WGET/-q} -v -c "$url" "$@" 2>&1 | \
+	while read wgetline; do
+		if [[ "$wgetline" =~ .*\ ([0-9]+)%.* ]]; then
+			perc=${BASH_REMATCH[1]}
+			if [ "$perc" != "$prev" ]; then
+				POL_SetupWindow_pulse $perc
+				prev="$perc"
+			fi
+			ellipsis=1
+		else
+			[ "$ellipsis" ] && echo "..."
+			ellipsis=''
+			echo $wgetline
+		fi
+	done|tee "$wgetlog"
+	local code=$?
+	if [ $code -ne 0 ]; then
+		# man wget
+		local msg="error $code"
+		[ $code -eq 1 ] && msg="Generic error code"
+		[ $code -eq 2 ] && msg="Parse error"
+		[ $code -eq 3 ] && msg="File I/O error"
+		[ $code -eq 4 ] && msg="Network failure"
+		[ $code -eq 5 ] && msg="SSL verification failure"
+		[ $code -eq 6 ] && msg="Username/Password authentication failure"
+		[ $code -eq 7 ] && msg="Protocol errors"
+		[ $code -eq 8 ] && msg="Server issued an error response"
+		POL_Debug_Fatal "POL_System_wget failed: $msg\n$(cat "$wgetlog")"
+	fi
+        set +o pipefail
+	rm "$wgetlog"
+
+	POL_SetupWindow_pulse 100
+
+	return 0
+}
+POL_System_CopyDirectory()
+{
+	# Usage POL_System_CopyDirectory [From] [To] [expected size]
+	if [ "$3" = "" ]; then
+		esize="$(du "$1"| tail -n 1 | awk '{print $1}')"
+	else
+		esize="$3"
+	fi
+        local statusfile="$POL_USER_ROOT/tmp/cpstatus.$$"
+	(cp -R "$1/." "$2/"; echo $? > "$statusfile") & pid="$!"
+
+	POL_SetupWindow_DirectoryProgress "$2" "$esize" "$pid"
+        local exitcode="$(cat "$statusfile")"
+        [ "$exitcode" = "0" ] || POL_Debug_Fatal "POL_System_CopyDirectory failed, error $exitcode !"
+}
+POL_Shortcut_Document()
+{
+	# Add a manual to a shortcut
+	# Usage : POL_Shortcut_Document <Shortcut Name> <file path>
+	[ "$2" = "" ] && return
+	rm -f "$POL_USER_ROOT/configurations/manuals/$1"
+	Binaire="$2"
+	if [ "$(echo "$Binaire" | grep "/")" = "" ]; then # Binaire
+		binary_path="$(find ./ -name windows -prune -o -iname "$Binaire" -a -type f -print | tail -n 1)"
+		[ -z "$binary_path" ] && binary_path="$(find ./windows/ -iname "$Binaire" -a -type f -print | tail -n 1)"
+		ln -s "$PWD/$binary_path" "$POL_USER_ROOT/configurations/manuals/$1"
+
+	else # Chemin
+		[ -e "./$Binaire" ] && binary_path="$PWD/$Binaire" || binary_path="$Binaire"
+		ln -s "$binary_path" "$POL_USER_ROOT/configurations/manuals/$1"
+
+	fi
+	
+}
+POL_Shortcut_Configurator ()
+{
+	# Add a configurator to a shortcut
+	# Usage: 
+        # POL_Shortcut_Configurator "Shortcut name" "Program.exe"
+        # or 
+        # POL_Shortcut_Configurator "Shortcut name" <<_EOFCFG_
+	# <Configurator script>
+	# _EOFCFG_
+
+	(cat <<_PRELUDE_
+#!/bin/bash
+[ -z "\$PLAYONLINUX" ] && exit 0
+source "\$PLAYONLINUX/lib/sources"
+export WINEPREFIX="\$POL_USER_ROOT/wineprefix/$PREFIX"
+export WINEDEBUG="-all"
+
+POL_LoadVar_PROGRAMFILES
+
+TITLE="$TITLE"
+_PRELUDE_
+	 if [ -n "$2" ]; then
+	         binary_path="$(find_binary "$2")"
+		 binary_dir="$(dirname "$binary_path")"
+		 Binaire="$(basename "$binary_path")"
+
+		 [ "$binary_dir" = "" ] && POL_Debug_Fatal "Can't find $Binaire"
+		 echo "cd \"$WINEPREFIX/drive_c/$binary_dir\""
+		 echo "POL_Wine \"$Binaire\" $SpecialArg \"\$@\""
+	 else
+		 cat
+	 fi
+	) > "$POL_USER_ROOT/configurations/configurators/$1"
+}
+
+POL_RequiredVersion ()
+{
+	# Stop the current script is the current version is lower the required one
+	# Usage : POL_RequiredVersion [VERSION]
+	NEEDED="$1"
+	if VersionLower "$VERSION" "$NEEDED"
+	then
+		POL_Debug_Warning "POL_RequiredVersion not satisfied! User version :$VERSION, expected $NEEDED"
+		POL_SetupWindow_message "$(eval_gettext 'Sorry, $APPLICATION_TITLE $VERSION is too old to continue.\n$APPLICATION_TITLE $NEEDED is required.')" "$TITLE"
+		POL_SetupWindow_Close
+		exit 0
+	fi
+}
+
+POL_AdvisedVersion ()
+{
+	# Alert the user, but don't stop the current script is the current version is lower the required one
+	# Usage : POL_AdvisedVersion [VERSION]
+	NEEDED="$1"
+	
+	if VersionLower "$VERSION" "$NEEDED"
+	then
+		POL_Debug_Warning "POL_AdvisedVersion not satisfied! User version :$VERSION, expected $NEEDED"
+		POL_SetupWindow_message "$(eval_gettext 'Warning: You are running $APPLICATION_TITLE $VERSION.\n$APPLICATION_TITLE $NEEDED is recommended to continue.')" "$TITLE"
+	fi
+}
+
+POL_Configurator_runparts ()
+{
+	# Inside a configurator, in a place where SetupWindow and Debug are initialized, sources
+	# the the configurator parts named after main configurator script plus some extension
+	# (say the patch they're related to) in alphabetical order.
+	# Usage : POL_Configurator_runparts
+
+	shopt -s nullglob
+	for conf in "$0".*; do
+		source "$conf"
+	done
+}
+POL_Shortcut_AddLink()
+{
+	# Add a link to a shortcut
+	# Usage : POL_Shortcut_AddLink [Shortcut] [Title] [URL]
+	
+	echo "$2|$3" >> "$POL_USER_ROOT/configurations/links/$1"
+}
+POL_Shortcut_AddProfileLink()
+{
+	# Add a scriptor profile link to a shortcut
+	# Usage : POL_Shortcut_AddProfileLink [Shortcut] [Username] [Userid]
+	# User can choose to disable it (POL_Config : PROFILE_LINK set to FALSE).
+	
+	AUTHOR="$2"
+	if [ "$(POL_Config_Read "PROFILE_LINK")" != "FALSE" ]; then
+		POL_Shortcut_AddLink "$1" "PROFILEBUTTON/$(eval_gettext '$AUTHOR profile')" "http://www.$POL_DNS/en/profil-$(POL_Website_urlencode "$3").html?referer=$(POL_Website_urlencode "$1")"
+	fi
+}
+POL_LoadVar_Distro ()
+{
+	if [ "$POL_OS" = "Linux" ]; then
+		export DISTRO="$(lsb_release -d | cut -d':' -f2 | tr -d \\t)"
+	else
+		main_kernel="$(uname -r | cut -d '.' -f 1)"
+		second_kernel="$(uname -r | cut -d '.' -f 2)"
+
+		[ "$main_kernel" = "8" ] && MacOS="Tiger"
+		[ "$main_kernel" = "9" ] && MacOS="Leopard"		
+		[ "$main_kernel" = "10" ] && MacOS="Snow Leopard"
+		[ "$main_kernel" = "11" ] && MacOS="Lion"
+		[ "$main_kernel" = "12" ] && MacOS="Mountain Lion"
+		
+		export DISTRO="$MacOS 10.$(( main_kernel - 4)).$second_kernel ($(uname -r))"
+	fi
+}
+POL_Shortcut_MakeDesktopShortcut()
+{
+	PACKAGE="$1"
+	if [ "$POL_OS" = "Mac" ]; then
+		DIRAPP="$HOME/Desktop/$PACKAGE.app"
+		shortname="´printf $PACKAGE | tr -c [[a-zA-Z0-9]\.] '_'´"
+		make_skeleton "$PACKAGE"
+		make_icon "$PACKAGE"
+		make_pom_script "$PACKAGE"
+		make_plist "$PACKAGE" "$shortname"
+	fi
+	if [ "$POL_OS" = "Linux" ]; then
+		if [ -f "$REPERTOIRE/icones/full_size/$PACKAGE" ]; then # L'icone existe...
+			iconPath="$REPERTOIRE/icones/full_size/$PACKAGE"
+		else
+			iconPath="$PLAYONLINUX/etc/playonlinux.png"
+		fi
+		# http://stackoverflow.com/questions/8939580/bash-split-a-string-exactly-like-readline-would-split-it
+		eval set -- $(grep '^POL_Wine ' "$POL_USER_ROOT/shortcuts/$PACKAGE"|tail -n 1)
+		local binary="$2"
+		generer_icone "$iconPath" "$PACKAGE" "$DESKTOP" "$PLAYONLINUX/playonlinux --run \"$PACKAGE\"" "$binary" ""
+	fi
+}
+POL_System_is32bit()
+{
+	# Check if the file (1) is a 32bit executable
+	
+	file "$1" | grep -q "PE32"
+}

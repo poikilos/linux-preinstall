@@ -1,0 +1,71 @@
+#!/bin/bash
+
+# Copyright (C) 2007-2010 PlayOnLinux Team
+# Copyright (C) 2011 Pâris Quentin
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA. 
+
+# This is the startup script
+
+[ "$PLAYONLINUX" = "" ] && exit 0
+source "$PLAYONLINUX/lib/sources" 
+
+[ "$POL_OS" = "Mac" ] && exit 0
+# This script tests OpenGL libs
+# Usage :
+
+# check_gl [arch]
+# Arch = (x86 | amd64)
+
+[ "$2" = "stdout" ] && cmd="$echo" || cmd="POL_Debug_Message"
+[ "$2" = "stdout" ] && cmdW="$echo" || cmdW="POL_Debug_Warning"
+
+Check_OpenGL()
+{
+	if [ -e "$PLAYONLINUX/bin/check_dd_$1.bz2" ]
+	then
+		mkdir -p "$POL_USER_ROOT/tmp"
+		cp "$PLAYONLINUX/bin/check_dd_$1.bz2" "$POL_USER_ROOT/tmp/"
+		bunzip2 "$POL_USER_ROOT/tmp/check_dd_$1.bz2" 2> /dev/null
+		chmod +x "$POL_USER_ROOT/tmp/check_dd_$1"
+		message="$("$POL_USER_ROOT/tmp/check_dd_$1")"
+		out="$?"
+		
+		if [ "$out" = "0" ]
+		then
+			$cmd "$message"
+			exit 0
+		else
+			$cmdW "$message"
+			exit 2
+		fi
+	else
+		exit 0
+	fi	
+}
+cd /tmp
+
+if [ "$1" = "x86" ]
+then
+	archtype="elf_i386"
+	archstring="32 bits"
+	Check_OpenGL "$1"
+fi
+if [ "$1" = "amd64" -a "$AMD64_COMPATIBLE" = "True" ]
+then
+	archtype="elf_x86_64"
+	archstring="64 bits"
+	Check_OpenGL "$1"
+fi

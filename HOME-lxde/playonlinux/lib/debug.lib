@@ -1,0 +1,233 @@
+#!/bin/bash
+
+# Copyright (C) 2007-2011 PlayOnLinux Team
+# Copyright (C) 2007-2011 Pâris Quentin
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA. 
+
+# debug.lib
+# ---------
+#
+# This lib contains PlayOnLinux's debug API 
+ 
+POL_LOGS="$REPERTOIRE/logs" # Where are logfile stored
+LOGFILE="/dev/null"  # By default, don't log anything
+POL_Color_RedBold='\x1b[1;31m'
+POL_Color_BlueBold='\x1b[1;34m' 
+POL_Color_YellowBold='\x1b[1;33m'
+POL_Color_Reset='\x1b[0m'
+
+Get_CurrentDate()
+{
+	# Return the current date
+	date "+%D %T"
+}
+POL_Debug_Init()
+{
+	# Init debugging API. 
+	# By calling this function in a script, PlayOnLinux will be able to store all debug information in a logfile,
+	# so that the user can send it to us
+	# Usage : POL_Debug_Init
+	
+	if [ "$TITLE" = "" ]
+	then
+		POL_Debug_Fatal "\$TITLE must be set to use debugging API" 
+	else
+		LOGTITLE="${TITLE}"
+		if [ "$POL_LOGS" -a "$LOGTITLE" ]; then
+			if [ -e "$POL_LOGS/$LOGTITLE" ]; then
+				rm -rf "$POL_LOGS/$LOGTITLE"
+			fi
+		fi
+		mkdir -p "$POL_LOGS/$LOGTITLE"
+		DEBUGGING="$POL_LOGS/$LOGTITLE/"
+		LOGFILE="$DEBUGGING/$LOGTITLE.log"
+		POL_Debug_Header
+	fi
+}
+POL_Debug_Header()
+{
+	# This function permits us to have access to information about the user's computer, 
+	# so that we can help him easily
+	# This function is automaticaly called by POL_Debug_Init, you should not use it
+	# Usage : POL_Debug_Header
+	
+	if [ "$WINETRICKS_PKG" ]; then
+		WINETRICKS="winetricks packages : $WINETRICKS"
+	fi
+	cat << EOF1 >> "$LOGFILE"
+PlayOnLinux debbuging tool (v${VERSION})
+-----------------------------------------------
+Debugging: ${TITLE}
+
+Warning. This is a PlayOnLinux script logfile. It does not contains everything that happened in your program virtual drive (wineprefix)
+Please do not use this logfile on winehq forum, this logfile is not interesting for wine debugging.
+
+Date: $(Get_CurrentDate)
+
+> uname -a
+  $(uname -a)
+> lsb_release -a
+  $(lsbrelease -a 2> /dev/null)
+> wine --version (Be careful, this version might not be the version used 
+in the script. Read the content of this file for more information)
+  $(wine --version)
+> glxinfo \| grep rendering
+  $(POL_Glxinfo | grep rendering 2> /dev/null)
+> glxinfo \| grep renderer
+  $(POL_Glxinfo | grep renderer 2> /dev/null)
+> OpenGL libs
+  $("$PLAYONLINUX/bash/check_gl" x86 stdout)
+  $("$PLAYONLINUX/bash/check_gl" amd64 stdout)
+> export
+  $(export | grep -v -i http_proxy | grep -v POL_PASSWORD)
+
+$1
+EOF1
+}
+POL_Debug_Message()
+{
+	# Use this function to say something to the person who read the log file
+	# Usage : POL_Debug_Message [MESSAGE]
+	
+	echo "$(Get_CurrentDate) - [${FUNCNAME[1]}] Message: $@" >> "$LOGFILE"
+	echo -e "[${FUNCNAME[1]}] ${POL_Color_BlueBold}Message:${POL_Color_Reset} $@" 1>&2
+}
+POL_Debug_Warning()
+{
+	# Use this function if you have found a problem that should not have consequences
+	# Usage : POL_Debug_Warning [MESSAGE]
+	
+	echo "$(Get_CurrentDate) - [${FUNCNAME[1]}] Warning: $@" >> "$LOGFILE"
+	echo -e "[${FUNCNAME[1]}] ${POL_Color_YellowBold}Warning:${POL_Color_Reset} $@" 1>&2
+}
+POL_Debug_ErrorSilent()
+{
+	# Use this function if a problem occured. 
+	# At the end of the script, the user will be able to report a bug to playonlinux's bug tracker
+	# Usage : POL_Debug_Error [MESSAGE]
+	
+	echo "$(Get_CurrentDate) - [${FUNCNAME[1]}] Error: $@" >> "$LOGFILE"
+	echo -e "[${FUNCNAME[1]}] ${POL_Color_RedBold}Error:${POL_Color_Reset} $@" 1>&2
+	[ "$SETUPWINDOW_INIT" = "true" ] || StandAloneWindow="true"
+	[ "$StandAloneWindow" = "true" ] && POL_SetupWindow_Init
+	MESSAGE="$(eval_gettext '$APPLICATION_TITLE has encountered an error. If the program does not work correctly, it might be the cause of the problem.\nVisit www.$POL_DNS to get further information')"
+	echo "$POL_COOKIE	POL_Debug	$$	$MESSAGE	$TITLE	Error in ${FUNCNAME[1]}\n$(POL_Untab "$@")" | ncns "$POL_HOST" "$POL_PORT"
+	[ "$StandAloneWindow" = "true" ] && POL_SetupWindow_Close 
+}
+POL_Debug_Error()
+{
+	# Use this function if a problem occured. 
+	# At the end of the script, the user will be able to report a bug to playonlinux's bug tracker
+	# Usage : POL_Debug_Error [MESSAGE]
+	
+	echo "$(Get_CurrentDate) - [${FUNCNAME[1]}] Error: $@" >> "$LOGFILE"
+	echo -e "[${FUNCNAME[1]}] ${POL_Color_RedBold}Error:${POL_Color_Reset} $@" 1>&2
+	[ "$SETUPWINDOW_INIT" = "true" ] || StandAloneWindow="true"
+	[ "$StandAloneWindow" = "true" ] && POL_SetupWindow_Init
+	MESSAGE="$(eval_gettext '$APPLICATION_TITLE has encountered an error. If the program you are installing does not work correctly, it might be the cause of the problem.\nVisit www.$POL_DNS to get further information')"
+	echo "$POL_COOKIE	POL_Debug	$$	$MESSAGE	$TITLE	Error in ${FUNCNAME[1]}\n$(POL_Untab "$@")" | ncns "$POL_HOST" "$POL_PORT"
+	[ "$StandAloneWindow" = "true" ] && POL_SetupWindow_Close || export POL_SCRIPT_FAILED="YES"
+}
+POL_Debug_Fatal()
+{
+	# Use this function if a strong problem occured
+	# The effect is the same that POL_Debug_Error, except that the script will end
+	# Usage : POL_Debug_Fatal [MESSAGE]
+	
+	echo "$(Get_CurrentDate) - [${FUNCNAME[1]}] Fatal: $@" >> "$LOGFILE"
+	echo -e "[${FUNCNAME[1]}] ${POL_Color_RedBold}Fatal:${POL_Color_Reset} $@" 1>&2
+	[ "$SETUPWINDOW_INIT" = "true" ] || POL_SetupWindow_Init
+	MESSAGE="$(eval_gettext '$APPLICATION_TITLE has encountered a fatal error. $APPLICATION_TITLE will stop the installation process.\nVisit www.$POL_DNS to get further information')"
+	echo "$POL_COOKIE	POL_Debug	$$	$MESSAGE	$TITLE	Error in ${FUNCNAME[1]}\n$(POL_Untab "$@")" | ncns "$POL_HOST" "$POL_PORT"
+	export POL_SCRIPT_FAILED="YES"
+	POL_SetupWindow_Close
+	exit 1
+}
+POL_Debug_lspci()
+{
+	# Get information about PCI cards in one's computer
+	# Usage : POL_Debug_lspci
+	
+	lspci > "$DEBUGGING/lspci.log"
+}
+POL_Debug_cpuinfo()
+{
+	# Get information about cpu in one's computer
+	# Usage : POL_Debug_cpuinfo
+	
+	cat /proc/cpuinfo > "$DEBUGGING/cpuinfo.log"
+}
+POL_Debug_glxinfo()
+{
+	# Get information about glx in one's computer
+	# Usage : POL_Debug_glxinfo
+	
+	POL_Glxinfo > "$DEBUGGING/glxinfo.log"
+}
+POL_Debug_InitPrefix()
+{
+	POL_Glxinfo 2> /dev/null > "$POL_USER_ROOT/tmp/glxinfo"
+	POL_LoadVar_Distro
+	PATCHSTUFF="$(POL_Wine_GetPatchName $POL_WINEVERSION)"
+	[ ! "$PATCHSTUFF" = "" ] && PATCHSTUFF="Warning! $APPLICATION_TITLE is using a modified wine version ($POL_WINEVERSION).
+	Do not file bugs, AppDB test reports, or ask for help on the WineHQ website for any applications or games that are run using this version.
+	"
+	cat <<- EOF >> "$WINEPREFIX/playonlinux.log"
+	
+	PlayOn$POL_OS logfile
+	-------------------
+	Date: $(Get_CurrentDate)
+	$PATCHSTUFF
+	> PlayOn$POL_OS Version
+	  $VERSION
+	> uname -a
+	  $(uname -a)
+	> lsb_release -a
+	  $(lsbrelease -a 2> /dev/null)
+	> wine --version
+	  $(POL_Wine --version)
+	> POL_WINEVERSION
+	  $POL_WINEVERSION
+	> WINEPREFIX
+	  $WINEPREFIX
+	> Distribution
+	  $DISTRO
+	> glxinfo \| grep rendering
+	  $(cat "$POL_USER_ROOT/tmp/glxinfo" | grep rendering)
+	> glxinfo \| grep renderer
+	  $(cat "$POL_USER_ROOT/tmp/glxinfo" | grep renderer)
+	> OpenGL libs (Direct rendering testing)
+	  $("$PLAYONLINUX/bash/check_gl" x86 stdout)
+	  $("$PLAYONLINUX/bash/check_gl" amd64 stdout)
+	
+	EOF
+}
+POL_Debug_LogToPrefix()
+{
+	echo "[$(Get_CurrentDate)] - $@" >> "$WINEPREFIX/playonlinux.log"
+}
+POL_Glxinfo()
+{
+	if [ "$POL_OS" = "Linux" ]; then
+		glxinfo "$@"
+	else
+		if [ -e "/opt/X11/bin/glxinfo" ]; then #XQuartz is installed
+			/opt/X11/bin/glxinfo "$@"
+		else
+			glxinfo "$@"
+		fi
+	fi
+}

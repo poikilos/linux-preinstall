@@ -1,0 +1,821 @@
+#!/bin/bash
+
+# Copyright (C) 2007-2011 PlayOnLinux Team
+# Copyright (C) 2007-2011 Pâris Quentin
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA. 
+
+# scripts.lib
+# -----------
+#
+# This lib contains all function to control PlayOnLinux setup windows
+
+export POL_SetupWindow_ID=$$ 
+export POL_HOST="127.0.0.1"
+
+POL_Untab()
+{
+	echo "${1//	/\\t}"
+}
+ncs()
+{
+	# Silent netcat
+	ncns "$@" > /dev/null 2> /dev/null
+}
+ncns()
+{
+	
+	if [ "$POL_OS" = "Mac" -o "$(POL_Config_Read FORCE_LEGACY_NETCAT)" = "TRUE" ]; then
+		nc "$@"
+	else
+		nc -q -1 "$@" 2> /dev/null || nc "$@"
+		# Differents possibilities
+	fi
+}
+POL_SetupWindow_Init ()
+{
+	# Open PlayOnLinux setup window. Should be use only once in a script !
+	# Needed for POL_SetupWindow_* functions
+	# Usage: POL_SetupWindow_Init
+	POL_Debug_Message "Creating new window for pid $$"
+	
+	local arg1 
+	local arg2
+	local arg3
+	[ "$1" = "--protect" ] && arg3="protect" && shift
+	
+	[ "$POL_SetupWindow_TopImage" = "" ] && arg1="$1" || arg1="$POL_SetupWindow_TopImage"
+	[ "$POL_SetupWindow_LeftImage" = "" ] && arg2="$2" || arg2="$POL_SetupWindow_LeftImage"
+	
+	[ "$arg1" = "" ] && arg1="None"
+	[ "$arg2" = "" ] && arg2="None"
+	[ "$arg3" = "" ] && arg3="None"
+	
+	echo "$POL_COOKIE	POL_SetupWindow_Init	$$	$arg1	$arg2	$arg3" | ncs "$POL_HOST" "$POL_PORT"
+	
+	export SETUPWINDOW_INIT="true"
+}
+POL_SetupWindow_Close ()
+{
+	# Close PlayOnLinux setup window.
+	# After this command, POL_SetupWindow_* functions won't work
+	# Should be used at the end of the script if POL_SetupWindow_Init has been called
+	# Usage: POL_SetupWindow_Close
+	POL_Debug_Message "Closing window for pid $$"
+	if [ "$POL_SCRIPT_FAILED" = "YES" -a -n "$LOGTITLE" -a -n "$DEBUGGING" -a -z "$NOBUGREPORT" ]
+	then
+		POL_SetupWindow_question "$(eval_gettext "An error occured during the installation process\n\nDo you want to send the bug to $APPLICATION_TITLE ?")" "$TITLE"
+		if [ "$APP_ANSWER" = "TRUE" ]
+		then
+			export LOGTITLE
+			bash "$PLAYONLINUX/bash/bug_report" &
+		fi
+	fi
+	
+	echo "$POL_COOKIE	POL_SetupWindow_Close	$$" | ncs "$POL_HOST" "$POL_PORT"
+	export SETUPWINDOW_INIT="false"
+}
+
+POL_SetupWindow_presentation ()
+{
+	# Default presentation of a script
+	# Usage: POL_SetupWindow_presentation [Program's name] [Program's editor] [Editor's url] [Scriptor's name] [Prefix's name]
+	[ "$3" = "" ] || url="($3)" 
+	POL_SetupWindow_free_presentation "$(eval_gettext 'Welcome to $APPLICATION_TITLE Installation Wizard.')" "$(eval_gettext 'This wizard will help you install ')$1$(eval_gettext ' on your computer.')\n\n$(eval_gettext 'This program was created by: ')$2\n$url\n\n$(eval_gettext 'This installation program is provided by: ')$4\n\n$1$(eval_gettext ' will be installed in: ')$REPERTOIRE/wineprefix/$5$(eval_gettext "\n\n$APPLICATION_TITLE is not responsible for anything that might happen as a result of using these scripts.\n\n")$(eval_gettext 'Click Next to start')"
+
+}
+POL_SetupWindow_free_presentation ()
+{
+	# Free presentation for a script
+	# Usage POL_SetupWindow_free_presentation [title] [message]
+	
+	echo "$POL_COOKIE	POL_SetupWindow_free_presentation	$$	$(POL_Untab "$1")	$(POL_Untab "$2")" | ncs "$POL_HOST" "$POL_PORT"
+}
+POL_SetupWindow_message ()
+{
+	# Shows a simple message
+	# Usage POL_SetupWindow_message [message] [title]
+	
+	echo "$POL_COOKIE	POL_SetupWindow_message	$$	$(POL_Untab "$1")	$(POL_Untab "$2")" | ncs "$POL_HOST" "$POL_PORT"
+}
+POL_SetupWindow_missing ()
+{
+	# Shows a message if once's program is missing
+	# Read depend.lib
+	# Usage POL_SetupWindow_missing
+	
+	if [ "$MANQUE" = "true" ]; then
+		LNG_MISSING_ERROR=$(eval_gettext "One or more program(s) are missing. Please install them and run the script again.")
+
+		POL_SetupWindow_message "$LNG_MISSING_ERROR\n\n$MISSING" "$(eval_gettext Error)"
+		POL_SetupWindow_Close
+		exit $EXIT_MISSING
+	fi
+}
+POL_SetupWindow_licence ()
+{
+	# Shows a licence file, and force the user to accept it to continue
+	# Usage POL_SetupWindow_licence [message] [title] [licence's file]
+	echo "$POL_COOKIE	POL_SetupWindow_licence	$$	$(POL_Untab "$1")	$(POL_Untab "$2")	$3" | ncs "$POL_HOST" "$POL_PORT"
+}
+
+POL_SetupWindow_wait_next_signal ()
+{
+	# Wait for next POL_SetupWindow_ command
+	# Shows a pulsebar
+	# Usage POL_SetupWindow_wait_next_signal [message] [title]
+
+	echo "$POL_COOKIE	POL_SetupWindow_wait	$$	$(POL_Untab "$1")	$(POL_Untab "$2")" | ncs "$POL_HOST" "$POL_PORT"
+}
+POL_SetupWindow_wait_button ()
+{
+	# Wait for next POL_SetupWindow_ command
+	# Shows a pulsebar
+	# Usage POL_SetupWindow_wait_next_signal [message] [title] [Button text] [Command] [Confirm message (0 = No confirmation needed)]
+	
+	echo "$POL_COOKIE	POL_SetupWindow_wait_bis	$$	$(POL_Untab "$1")	$(POL_Untab "$2")	$3	export PLAYONLINUX="$PLAYONLINUX" ; export WINEPREFIX="$WINEPREFIX" ; export PATH="$PATH" ; export LD_LIBRARY_PATH="$LD_LIBRARY_PATH" ; $4	$5" | ncs "$POL_HOST" "$POL_PORT"
+	
+}
+POL_SetupWindow_pulsebar ()
+{
+	# Same than POL_SetupWindow_wait_next_signal, except that you can control the bar
+	# Usage POL_SetupWindow_pulsebar [message] [title]
+	
+	echo "$POL_COOKIE	POL_SetupWindow_pulsebar	$$	$(POL_Untab "$1")	$(POL_Untab "$2")" | ncs "$POL_HOST" "$POL_PORT"
+}
+POL_SetupWindow_pulse ()
+{
+	# Change the pulsebar position (0 - 100)
+	# Usage POL_SetupWindow_pulse [position]
+
+	echo "$POL_COOKIE	POL_SetupWindow_pulse	$$	$1" | ncs "$POL_HOST" "$POL_PORT"
+}
+POL_SetupWindow_set_text ()
+{
+	# Change the pulsebar's text
+	# Usage POL_SetupWindow_set_text [message]
+	echo "$POL_COOKIE	POL_SetupWindow_set_text	$$	$(POL_Untab "$1")" | ncs "$POL_HOST" "$POL_PORT"
+}
+POL_SetupWindow_wait ()
+{
+	# POL_SetupWindow_wait_next_signal in shorter
+	POL_SetupWindow_wait_next_signal "$@"
+}
+POL_SetupWindow_download ()
+{
+	# Download a file and place it to the current directory
+	# Usage: POL_SetupWindow_download [message] [title] [url] [file]
+	# /!\ Scriptors should directly use POL_Download
+        # If provided, make sure the filename is absolute to avoid any misinterpretation from server
+        [ -n "$4" ] && FILENAME="$4" || FILENAME="$PWD/"
+	Result="$(echo "$POL_COOKIE	POL_SetupWindow_download	$$	$(POL_Untab "$1")	$(POL_Untab "$2")	$3	$(POL_Untab "$FILENAME")" | ncns "$POL_HOST" "$POL_PORT")"
+	# FIXME: Result should send 'fail' if the download has failed. Maybe we could catch it
+}
+
+POL_SetupWindow_textbox ()
+{
+	# Shows a text box
+	# Usage: POL_SetupWindow_textbox [message] [title] [default value]
+	# Result is sent in $APP_ANSWER variable
+
+	APP_ANSWER="$(echo "$POL_COOKIE	POL_SetupWindow_textbox	$$	$(POL_Untab "$1")	$(POL_Untab "$2")	$3" | ncns "$POL_HOST" "$POL_PORT")"
+        POL_Debug_Message "textbox answer: $APP_ANSWER"
+}
+POL_SetupWindow_browse ()
+{
+	# Shows a text box with a browse button
+	# Usage: POL_SetupWindow_browse [message] [title] [default value] [Supported file types]
+	# Result is sent in $APP_ANSWER variable
+	[ "$4" = "" ] && SUPPORTED="All" || SUPPORTED="$4"
+	APP_ANSWER="$(echo "$POL_COOKIE	POL_SetupWindow_browse	$$	$(POL_Untab "$1")	$(POL_Untab "$2")	$3	$PWD	$SUPPORTED" | ncns "$POL_HOST" "$POL_PORT")"
+	POL_Debug_Message "browser answer: $APP_ANSWER"
+}
+POL_SetupWindow_question ()
+{
+	# Shows a yes/no question
+	# Usage: POL_SetupWindow_question [message] [title]
+	# Result is sent in $APP_ANSWER variable (TRUE or FALSE)
+
+	APP_ANSWER="$(echo "$POL_COOKIE	POL_SetupWindow_question	$$	$(POL_Untab "$1")	$(POL_Untab "$2")" | ncns "$POL_HOST" "$POL_PORT")"
+	POL_Debug_Message "question answer: $APP_ANSWER"
+}
+POL_SetupWindow_menu ()
+{
+	# Shows a menu
+	# Usage: POL_SetupWindow_menu [message] [title] [list] [separator]
+	# Result is sent in $APP_ANSWER variable
+
+	APP_ANSWER="$(echo "$POL_COOKIE	POL_SetupWindow_menu	$$	$(POL_Untab "$1")	$(POL_Untab "$2")	$3	$4" | ncns "$POL_HOST" "$POL_PORT")"
+	POL_Debug_Message "menu answer: $APP_ANSWER"
+}
+POL_SetupWindow_icon_menu ()
+{
+	# Shows a menu with icons
+	# Usage: POL_SetupWindow_icon_menu [message] [title] [list] [separator] [icons list] [icons folder]
+	# Result is sent in $APP_ANSWER variable
+
+	APP_ANSWER="$(echo "$POL_COOKIE	POL_SetupWindow_icon_menu	$$	$(POL_Untab "$1")	$(POL_Untab "$2")	$3	$4	$5	$6" | ncns "$POL_HOST" "$POL_PORT")"
+	POL_Debug_Message "icon_menu answer: $APP_ANSWER"
+}
+POL_SetupWindow_checkbox_list ()
+{
+	# Shows a list of checkbox
+	# Usage: POL_SetupWindow_checkbox [message] [title] [list] [separator]
+	# Checked boxes are sent in $APP_ANSWER variable, with the same separator
+
+	APP_ANSWER="$(echo "$POL_COOKIE	POL_SetupWindow_checkbox_list	$$	$(POL_Untab "$1")	$(POL_Untab "$2")	$3	$4" | ncns "$POL_HOST" "$POL_PORT")"
+	POL_Debug_Message "checkbox_list answer: $APP_ANSWER"
+}
+POL_SetupWindow_menu_num ()
+{
+	# Shows a menu
+	# Usage: POL_SetupWindow_menu_num [message] [title] [list] [separator]
+	# The number of the result is sent in $APP_ANSWER variable
+
+	APP_ANSWER="$(echo "$POL_COOKIE	POL_SetupWindow_menu_num	$$	$(POL_Untab "$1")	$(POL_Untab "$2")	$3	$4" | ncns "$POL_HOST" "$POL_PORT")"
+	POL_Debug_Message "menu_num answer: $APP_ANSWER"
+}
+POL_SetupWindow_menu_list ()
+{
+	# Shows a menu (combobox)
+	# Usage: POL_SetupWindow_menu [message] [title] [list] [separator]
+	# Result is sent in $APP_ANSWER variable
+	# Deprecated
+
+	POL_SetupWindow_menu "$@"
+}
+POL_SetupWindow_shortcuts_list ()
+{
+	# Shows the shortcut list
+	# Usage: POL_SetupWindow_shortcuts_list [message] [title]
+	# Result is sent in $APP_ANSWER variable
+	
+	APP_ANSWER="$(echo "$POL_COOKIE	POL_SetupWindow_shortcut_list	$$	$(POL_Untab "$1")	$(POL_Untab "$2")" | ncns "$POL_HOST" "$POL_PORT")"
+
+}
+POL_SetupWindow_prefix_selector ()
+{
+	# Shows a prefix selector
+	# Usage : POL_SetupWindow_prefix_selector [message]
+	# Result is sent in $APP_ANSWER variable
+	
+	Result="$(echo "$POL_COOKIE	POL_SetupWindow_prefix_selector	$$	$(POL_Untab "$1")	$TITLE" | ncns "$POL_HOST" "$POL_PORT")"
+
+	KINDOF="$(echo $Result | cut -d'~' -f1)" 
+	VALUE="$(echo $Result | cut -d'~' -f2)" 
+	if [ "$KINDOF" = "2" ]; then
+		export APP_ANSWER="$VALUE"
+	else
+		export APP_ANSWER="$(POL_Shortcut_GetPrefix "$VALUE")"
+	fi
+	
+}
+POL_SetupWindow_login ()
+{
+	# This function shows a login windows for PlayOnLinux's website
+	# Usage: POL_SetupWindow_login "Message" "Title" "Register link"
+	
+	if [ "$POL_OS" = "Mac" ]; then
+		register_link="http://www.playonmac.com/en/register.html"
+	else
+		register_link="http://www.playonlinux.com/en/register.html"
+	fi
+	[ "$3" = "" ] || register_link="$3"
+	
+	Result="$(echo "$POL_COOKIE	POL_SetupWindow_login	$$	$(POL_Untab "$1")	$(POL_Untab "$2")	$register_link" | ncns "$POL_HOST" "$POL_PORT")"
+	POL_LOGIN="$(echo $Result | cut -d'~' -f1)" 
+	POL_PASSWORD="$(echo $Result | cut -d'~' -f2)" 
+}
+POL_SetupWindow_file ()
+{
+	# Shows the content of a file
+	# Usage: POL_SetupWindow_file [message] [title] [file]
+	
+	echo "$POL_COOKIE	POL_SetupWindow_file	$$	$(POL_Untab "$1")	$(POL_Untab "$2")	$(POL_Untab "$3")" | ncs "$POL_HOST" "$POL_PORT"
+
+}
+POL_SetupWindow_textbox_multiline ()
+{
+	# Same than POL_SetupWindow_textbox, except that it accepts multiline
+	# Usage: POL_SetupWindow_textbox_multiline [message] [title] [default value]
+	
+	APP_ANSWER="$(echo "$POL_COOKIE	POL_SetupWindow_textbox_multiline	$$	$(POL_Untab "$1")	$(POL_Untab "$2")	$(POL_Untab "$3")" | ncns "$POL_HOST" "$POL_PORT")"
+	APP_ANSWER="${APP_ANSWER//\\n/
+}" # Not the end of POL_SetupWindow_textbox_multiline
+	POL_Debug_Message "textbox_multiline answer: $(echo "$APP_ANSWER"|head -n1)[...]"
+}
+
+
+
+# Higher level functions
+POL_SetupWindow_cdrom () 
+{
+	# Shows the cd-rom list to the user
+	# Usage: POL_SetupWindow_cdrom
+	# Result is sent to CDROM
+	
+	# 1 = Numéro du CD
+	LIST_DEVICES_=""
+	
+	[ "$POL_OS" = "Mac" ] && DEVICES="/Volumes"
+	if [ "$POL_OS" = "Linux" ]; then
+		DEVICES="/media"
+		# Ubuntu Quantal workaround
+		[ -d "/media/$USER" ] && DEVICES="/media/$USER"
+	fi
+	
+	cd "$DEVICES"
+	for device in *
+	do
+		if [ ! "$device" = "$LNG_OTHER" ]
+		then
+				LIST_DEVICES_+="$device~"
+		fi
+	done
+		
+	LNG_WINE_ASKFORCDROM=$(eval_gettext "Where is mounted your CD-ROM?")
+	LNG_OTHER=$(eval_gettext "Other")
+	LNG_REFRESH=$(eval_gettext "Refresh")
+	POL_SetupWindow_menu "$LNG_WINE_ASKFORCDROM" "$TITLE" "$LIST_DEVICES_$LNG_OTHER~$LNG_REFRESH" "~"		
+	CDROM="$APP_ANSWER"
+	
+	POL_Debug_Message "CD-ROM selected: $CDROM"
+	if [ "$CDROM" = "$LNG_OTHER" ]
+	then
+		POL_SetupWindow_textbox "$LNG_WINE_ASKFORCDROM" "$TITLE" "$DEVICES/cdrom"
+		CDROM="$APP_ANSWER"
+	elif [ "$CDROM" = "$LNG_REFRESH" ]
+	then
+		POL_SetupWindow_cdrom
+	else
+		CDROMc="$CDROM"
+		CDROM="$DEVICES/$CDROM"
+	fi
+
+
+	if [ "$CDROM" = "" ]
+	then
+		CDROM="$DEVICES/cdrom"
+	fi
+	POL_Debug_Message "cdrom answer: $CDROM"
+}
+POL_SetupWindow_check_cdrom ()
+{
+	# Checks if the cdrom is valid
+	# If not, callback to POL_SetupWindow_cdrom
+	# Usage: POL_SetupWindow_check_cdrom [setup_name.exe]
+	original_args="$@"
+	cdrom_found="false"
+	CDROM_SETUP=""
+	POL_SetupWindow_wait "$(eval_gettext 'Reading your device')" "$TITLE"
+	while [ ! "$1" = "" ]; do
+		if [ ! "$(find "$CDROM" -iwholename "$CDROM/$1")" = "" ]; then
+			cdrom_found="true"
+			CDROM_SETUP="$CDROM/$1"
+			POL_Debug_Message "$CDROM/$1 FOUND!"
+			break
+		else
+			POL_Debug_Message "$CDROM/$1 not found"
+		fi
+		shift
+	done
+	
+	if [ "$cdrom_found" = "false" ]; then
+		POL_Debug_Warning "Unable to find the CD-ROM"
+		POL_SetupWindow_message "$(eval_gettext "Error: Unable to find the CD-ROM!")" "$TITLE"
+		POL_SetupWindow_cdrom
+		POL_SetupWindow_check_cdrom "$original_args"
+	fi
+}
+POL_SetupWindow_cdrom_MountPC()
+{
+	if [ "$1" ]; then
+		if [ ! "$(find "$CDROM" -iwholename "$CDROM/$1")" = "" ]; then
+			return 0
+		fi
+	fi
+	
+	if [ "$POL_OS" = "Mac" -a "$CDROMc" ]; then
+		POL_SetupWindow_question "$(eval_gettext '$TITLE needs to read the PC part of a hybrid CD-Rom.\n\nBy default, MacOS only gives you access to the Mac part of the cd-rom, which may not be compatible with recent versions of Mac OS.\n\nDo you want PlayOnMac to attempt to read the PC-Part of your CD?')" "$TITLE"
+		if [ "$APP_ANSWER" = "TRUE" ]; then
+			POL_Debug_Message "Trying to mount windows part of $CDROM"
+			process()
+			{
+			        search="$1"
+			        read line
+			        while [ "$line" ]; do
+			                if [ "${line::5}" = "/dev/" ]; then
+			                        latest_device="$line";
+			                fi
+			                #echo $latest_device
+			                if [ ! "$(grep "${search::16}" <<< $line)" = "" ]; then
+			                        echo $latest_device
+			                        break
+			                fi 
+			                read line;
+			        done
+			}
+			device="$(diskutil list | process "$CDROMc")"
+			rdevice="${device}s1"
+			POL_Debug_Message "Preparing to mount $rdevice"
+			POL_SetupWindow_wait "$(eval_gettext 'Please wait...')" "$TITLE"
+			mount_point="/Volumes/${CDROMc}_Windows"
+			mkdir "$mount_point"
+			if mount -t cd9660 "$rdevice" "$mount_point"; then
+				export CDROM="$mount_point"
+				export mount_pc_succed="true"
+				if [ "$1" ]; then
+					if [ "$(find "$CDROM" -iwholename "$CDROM/$1")" = "" ]; then
+						POL_Debug_Fatal "Unable to find setup file ($1) on the windows part of the cdrom. Umounting"
+						POL_SetupWindow_cdrom_UmountPC
+					fi
+				fi
+			else
+				POL_Debug_Error "Your CD-ROM does not seem to be a hybrid Mac/PC CD-ROM" "$TITLE"
+				rmdir "$mount_point"
+			fi
+		fi
+	fi
+}
+POL_SetupWindow_cdrom_UmountPC()
+{
+	if [ "$POL_OS" = "Mac" -a "$CDROMc" -a "$mount_pc_succed" ]; then
+		POL_Debug_Message "Umounting PC part : $CDROM"
+		umount "$CDROM"
+		rmdir "$CDROM"
+	fi
+}
+POL_SetupWindow_cdrom_MountMessage ()
+{
+	if [ "$POL_OS" = "Mac" ]; then
+		POL_SetupWindow_message "$(eval_gettext "Don't forget to go to PlayOnMac tools menu -> Read a PC CD-Rom before running your game")" "$TITLE"
+	fi
+}
+POL_SetupWindow_DirectoryProgress ()
+{
+	# Progressbar, by reading a directory size
+	# Usage: POL_SetupWindow_DirectoryProgress [Directory] [Expected Size] [Pid to check]
+	# Good for cdrom copy
+	[ "$3" ] || return 1
+	[ "$4" ] && cMESSAGE="\n$4"
+	FICHIER="$1"
+	POL_SetupWindow_pulsebar "$(eval_gettext 'Please wait while $APPLICATION_TITLE is copying files:')$cMESSAGE" "$TITLE"
+
+	POL_SetupWindow_pulse 0
+	
+	while [ ! "$(ps aux | awk '{print $2}' | grep $3)" = "" ]; do
+		current_size="$(du "$1"| tail -n 1 | awk '{print $1}')"
+		current_perc=$(( 100 * $current_size / $2 ))
+		POL_SetupWindow_pulse "$current_perc"
+		sleep 1
+	done
+
+	POL_SetupWindow_pulse 100
+
+	return 0
+}
+
+POL_GetSetupImages () # ( optional : --erase ) 
+{
+	# This function helps you to manage your setup images
+	# It will download images only once, except if you use --erase
+	#
+	# 1 - Top image url
+	# 2 - Left image url
+	# 3 - Name (only alpha-numerical please)
+	# 
+	# Path of images are returned in $POL_SetupWindow_LeftImage and $POL_SetupWindow_TopImage
+
+	if [ "$1" == "--force" ]
+	then
+		left="$3"
+		top="$2"
+		name="$4"
+	else
+		left="$2"
+		top="$1"
+		name="$3"
+	fi	
+	mkdir -p "$POL_USER_ROOT/configurations/setups/$name"
+	cd "$POL_USER_ROOT/configurations/setups/$name"
+    
+    if [ "$top" == "" ]; then
+        export POL_SetupWindow_TopImage="$PLAYONLINUX/etc/setups/default/top.png"
+	elif [ "$1" == "--force" ] || [ ! -e "top" ]; then
+		$POL_WGET --timeout=10 "$top" -O top 2> /dev/null && POL_SetupWindow_TopImage="$PWD/top" || export POL_SetupWindow_TopImage="$PLAYONLINUX/etc/setups/default/top.png"
+		[ "$POL_SetupWindow_TopImage" = "$PLAYONLINUX/etc/setups/default/top.png" ] &&	rm -f top
+	else
+		POL_SetupWindow_TopImage="$PWD/top"
+	fi
+
+    if [ "$left" == "" ]; then
+        export POL_SetupWindow_LeftImage="$PLAYONLINUX/etc/setups/default/left.jpg"
+	elif [ "$1" == "--force" ] || [ ! -e "left" ]; then
+		$POL_WGET --timeout=10 "$left" -O left 2> /dev/null && POL_SetupWindow_LeftImage="$PWD/left" || export POL_SetupWindow_LeftImage="$PLAYONLINUX/etc/setups/default/left.jpg"
+		[ "$POL_SetupWindow_LeftImage" = "$PLAYONLINUX/etc/setups/default/left.jpg" ] && rm -f left
+	else
+		POL_SetupWindow_LeftImage="$PWD/left"
+	fi
+	cd "$OLDPWD"
+
+}
+
+POL_SetupWindow_InitWithImages ()
+{
+	# This function is identical than POL_SetupWindow_Init, excepts that it uses images defined in POL_GetSetupImages
+	# Usage: POL_SetupWindow_InitWithImages
+	POL_SetupWindow_Init "$@"
+}
+
+process_POL_SetupWindow_show_exe ()
+{
+	### Used by POL_SetupWindow_show_exe
+	read line
+	first=true
+	while [ ! "$line" = "" ]; do
+		[ "$first" = "true" ] && first=false || printf "~"
+		printf "$(basename "$line")"
+		read line
+	done
+}
+POL_SetupWindow_show_exe ()
+{
+	# Show the list of non-wine .exe file in the current prefix
+	# Usage : POL_SetupWindow_show_exe 
+
+	cd "$WINEPREFIX/drive_c"
+	POL_SetupWindow_wait_next_signal "$(eval_gettext "Scanning the virtual drive ...")" "$2"
+	contents="$(find . -name windows -prune -o -name iexplore.exe -prune -o -iname '*.exe' -a -type f -print | process_POL_SetupWindow_show_exe)"
+	POL_SetupWindow_menu "$1" "$2" "$contents" "~"
+}
+
+POL_SetupWindow_VMS ()
+{
+	# Ask the user how much memory does his graphic board have, and store it to POL config file
+	# Usage: POL_SetupWindow_VMS [minimum memory]
+	
+	[ "$WINEPREFIX" = "" ] && POL_Debug_Fatal "WINEPREFIX is not set !"
+	VMS="$(POL_Config_Read VMS)"
+	if [ "$VMS" = "" ]
+	then
+		POL_SetupWindow_menu "$(eval_gettext "How much memory does your graphics board have?")" "$TITLE" "64-128-256-320-384-512-640-768-896-1024-1536-1792-2048-3072-4096" "-"
+		VMS="$APP_ANSWER"
+		POL_Config_Write VMS $APP_ANSWER
+	fi
+	POL_Wine_Direct3D "VideoMemorySize" "$VMS"
+	if [ ! "$1" = "" ]
+	then
+		if [ $VMS -lt $1 ]
+		then
+			POL_Debug_Warning "$(eval_gettext "Video card does not have enough memory")" "$TITLE"
+			POL_SetupWindow_message "$(eval_gettext "Your video card does not have enough memory!\nIt might prevent the game from working")" "$TITLE"
+		fi
+	fi
+}
+
+POL_SetupWindow_InstallMethod()
+{
+	# Shows a list of install methods
+	# Usage: POL_SetupWindow_InstallMethod [List]
+	# Elements in list are separated by a coma
+	# Accepted methods are STEAM, STEAM_DEMO, LOCAL, CD, DVDROM, DOWNLOAD, ORIGIN, ORIGIN_DEMO, DESURA, DESURA_DEMO
+	[ "$1" = "" ] && POL_Debug_Fatal "No method in list"
+	STR=""
+	ICO=""
+	LNG_STEAM="$(eval_gettext "Use Steam Store version")"
+	LNG_STEAM_DEMO="$(eval_gettext "Use Steam Store demo version")"
+	LNG_DESURA="$(eval_gettext "Use Desura Store version")"
+	LNG_DESURA_DEMO="$(eval_gettext "Use Desura Store demo version")"
+	LNG_ORIGIN="$(eval_gettext "Use Origin Store version")"
+	LNG_ORIGIN_DEMO="$(eval_gettext "Use Origin Store demo version")"
+	
+	LNG_LOCAL="$(eval_gettext "Use a setup file in my computer")"
+	LNG_CDROM="$(eval_gettext "Use CD-ROM(s)")"
+	LNG_DVD="$(eval_gettext "Use DVD-ROM(s)")"
+	LNG_DOWNLOAD="$(eval_gettext "Download the program")"
+	
+	if [ ! "$(printf "$1" | grep LOCAL)" = "" ] 
+	then 
+		STR="$STR~$LNG_LOCAL"
+		ICO="$ICO~browse.png"
+	fi
+	if [ ! "$(printf "$1" | grep CD)" = "" ] 
+	then 
+		STR="$STR~$LNG_CDROM"
+		ICO="$ICO~cdrom.png"
+	fi
+	if [ ! "$(printf "$1" | grep DVD)" = "" ] 
+	then 
+		STR="$STR~$LNG_DVD"
+		ICO="$ICO~cdrom.png"
+	fi
+	if [ ! "$(printf "$1" | grep STEAM)" = "" ] 
+	then 
+		STR="$STR~$LNG_STEAM"
+		ICO="$ICO~download.png"
+	fi
+	if [ ! "$(printf "$1" | grep STEAM_DEMO)" = "" ] 
+	then 
+		STR="$STR~$LNG_STEAM_DEMO"
+		ICO="$ICO~download.png"
+	fi
+	
+	if [ ! "$(printf "$1" | grep DESURA)" = "" ] 
+	then 
+		STR="$STR~$LNG_DESURA"
+		ICO="$ICO~download.png"
+	fi
+	if [ ! "$(printf "$1" | grep DESURA_DEMO)" = "" ] 
+	then 
+		STR="$STR~$LNG_DESURA_DEMO"
+		ICO="$ICO~download.png"
+	fi
+	
+	if [ ! "$(printf "$1" | grep ORIGIN)" = "" ] 
+	then 
+		STR="$STR~$LNG_ORIGIN"
+		ICO="$ICO~download.png"
+	fi
+	if [ ! "$(printf "$1" | grep ORIGIN_DEMO)" = "" ] 
+	then 
+		STR="$STR~$LNG_ORIGIN_DEMO"
+		ICO="$ICO~download.png"
+	fi
+	
+	
+	if [ ! "$(printf "$1" | grep DOWNLOAD)" = "" ] 
+	then 
+		STR="$STR~$LNG_DOWNLOAD"
+		ICO="$ICO~download.png"
+	fi
+	
+	STR="${STR:1}"
+	ICO="${ICO:1}"
+	
+	mkdir -p "$POL_USER_ROOT/tmp/cache/icons/InstallMethod"
+	cp "$PLAYONLINUX/resources/images/icones/browse.png" "$POL_USER_ROOT/tmp/cache/icons/InstallMethod"
+	cp "$PLAYONLINUX/resources/images/icones/cdrom.png" "$POL_USER_ROOT/tmp/cache/icons/InstallMethod"
+	cp "$PLAYONLINUX/resources/images/icones/download.png" "$POL_USER_ROOT/tmp/cache/icons/InstallMethod"
+	
+	POL_SetupWindow_icon_menu "$(eval_gettext "Please choose an installation method")" "$TITLE"  "$STR" "~" "$POL_USER_ROOT/tmp/cache/icons/InstallMethod" "$ICO"
+	
+	# Si l'utilisateur n'a rien choisi
+	if [ "$APP_ANSWER" = "" ]
+	then
+		POL_SetupWindow_InstallMethod "$@"
+		return
+	fi
+	
+	[ "$APP_ANSWER" = "$LNG_LOCAL" ] && INSTALL_METHOD="LOCAL"
+	[ "$APP_ANSWER" = "$LNG_STEAM" ] && INSTALL_METHOD="STEAM"
+	[ "$APP_ANSWER" = "$LNG_STEAM_DEMO" ] && INSTALL_METHOD="STEAM_DEMO"
+	[ "$APP_ANSWER" = "$LNG_DESURA" ] && INSTALL_METHOD="DESURA"
+	[ "$APP_ANSWER" = "$LNG_DESURA_DEMO" ] && INSTALL_METHOD="DESURA_DEMO"
+	[ "$APP_ANSWER" = "$LNG_ORIGIN" ] && INSTALL_METHOD="ORIGIN"
+	[ "$APP_ANSWER" = "$LNG_ORIGIN_DEMO" ] && INSTALL_METHOD="ORIGIN_DEMO"
+	[ "$APP_ANSWER" = "$LNG_DOWNLOAD" ] && INSTALL_METHOD="DOWNLOAD"
+	[ "$APP_ANSWER" = "$LNG_DVD" ] && INSTALL_METHOD="DVD"
+	[ "$APP_ANSWER" = "$LNG_CDROM" ] && INSTALL_METHOD="CD"
+	
+	
+	POL_Debug_Message "Install method: $INSTALL_METHOD"
+}
+POL_SetupWindow_shortcut_creator()
+{
+	# Shows a shortcut creator
+	# Usage: POL_SetupWindow_shortcut_creator
+	# No argument, this function uses WINEPREFIX
+	[ "$WINEPREFIX" = "" ] && POL_Debug_Fatal "POL_SetupWindow_shortcut_creator : wineprefix not set"
+	existing="$(get_existing_POL_SetupWindow_shortcut_creator)"
+	
+	cd "$WINEPREFIX/drive_c"
+	CODENAME="$(POL_MD5 "$WINEPREFIX")"
+	mkdir -p "$POL_USER_ROOT/tmp/cache/icons/$CODENAME"
+	cp "$PLAYONLINUX/resources/images/icones/browse.png" "$POL_USER_ROOT/tmp/cache/icons/$CODENAME"
+	cp "$PLAYONLINUX/resources/images/icones/finish.png" "$POL_USER_ROOT/tmp/cache/icons/$CODENAME"
+	POL_SetupWindow_wait_next_signal "$(eval_gettext "Scanning the virtual drive ...")" "$TITLE"
+	contents="$(find . -name windows -prune -o -name iexplore.exe -prune -o -iname '*.exe' -a -type f -print | process_POL_SetupWindow_shortcut_creator)"
+	LNG_FINISH="$(eval_gettext "I don't want to make another shortcut")"
+	LNG_BROWSE="$(eval_gettext "Browse")"
+	[ "$contents" = "" ] || CONTENTS2="~$contents"
+	POL_SetupWindow_icon_menu "$(eval_gettext "Please choose a file for $APPLICATION_TITLE to make a shortcut")" "$TITLE"  "$LNG_FINISH~$LNG_BROWSE$CONTENTS2" "~" "$POL_USER_ROOT/tmp/cache/icons/$CODENAME" "finish.png~browse.png$CONTENTS2"
+	
+	EXE_FILE=""
+	if [ "$APP_ANSWER" = "$LNG_BROWSE" ]
+	then
+		cd $WINEPREFIX/drive_c || POL_Debug_Fatal "Prefix : $WINEPREFIX does not exist"
+		POL_SetupWindow_browse "$(eval_gettext "Please choose a file for $APPLICATION_TITLE to make a shortcut")" "$TITLE"
+		EXE_FILE="$(basename "$APP_ANSWER")"
+	elif [ ! "$APP_ANSWER" = "$LNG_FINISH" ]
+	then
+		EXE_FILE="$APP_ANSWER"
+	fi
+	if [ ! "$EXE_FILE" = "" ]
+	then
+                SUGGEST="${EXE_FILE%.*}"
+		POL_SetupWindow_textbox "$(eval_gettext "Please choose a shortcut name for $EXE_FILE")" "$TITLE" "$SUGGEST"
+		TITRE="$APP_ANSWER"
+		POL_Shortcut "$EXE_FILE" "$TITRE"
+		echo "POL_Shortcut \"$EXE_FILE\" \"$TITRE\"" >> "$POL_USER_ROOT/tmp/shortcuts"
+		POL_SetupWindow_shortcut_creator
+	fi
+}
+
+process_POL_SetupWindow_shortcut_creator ()
+{
+	### Used by POL_SetupWindow_shortcut_creator
+	read line
+	first=true
+	while [ ! "$line" = "" ]
+	do
+		if [ "$(echo $existing | grep $(basename "$line"))" = "" ] 
+		then
+			#echo "On tente d'extraire $WINEPREFIX/drive_c/$line"
+			POL_ExtractIcon "$WINEPREFIX/drive_c/$line" "$POL_USER_ROOT/tmp/cache/icons/$CODENAME/$(basename "$line")" 2> /dev/null > /dev/null
+			# Si il parle il fiche tout en l'air
+			[ "$first" = "true" ] && first=false || printf "~"
+			printf "$(basename "$line")"
+		fi
+		read line
+	done
+}
+get_existing_POL_SetupWindow_shortcut_creator()
+{
+	### Used by POL_SetupWindow_shortcut_creator
+	cd "$REPERTOIRE/shortcuts"
+	for file in *
+	do
+		if [ -e "$file" ] && [ ! "$(cat "$file" | grep $WINEPREFIX)" = "" ]
+		then
+			cat "$file" | grep "POL_Wine " | awk '{print $2}' | tr -d "\""
+		fi
+	done
+}
+
+POL_SetupWindow_RequiredCard()
+{
+	# Forcing usage of one kind of video card
+	
+	# Usage : POL_Wine_RequiredCard "NVIDIA,INTEL" (-v = blacklist) (for exemple)
+	MyCard="$(POL_Wine_DetectCard)"
+	
+	if [ ! "$(printf "$1" | grep "$MyCard" $2)" = "" ]; then
+		NOBUGREPORT="TRUE"
+		POL_Debug_Fatal "Sorry, your video card ($MyCard) is not supported to run $TITLE"
+	fi
+}
+POL_SetupWindow_AdvisedCard()
+{
+	# Advising usage of one kind of video card
+	
+	# Usage : POL_Wine_RequiredCard "NVIDIA,INTEL" (-v = blacklist) (for exemple)
+	MyCard="$(POL_Wine_DetectCard)"
+	
+	if [ ! "$(printf "$1" | grep "$MyCard" $2)" = "" ]; then
+		NOBUGREPORT="TRUE"
+		POL_Debug_Error "Your video card ($MyCard) might cause problems to run $TITLE"
+	fi
+}
+
+POL_SetupWindow_TestedCard()
+{
+	# Suggesting usage of one kind of video card
+	
+	# Usage : POL_Wine_TestCard "NVIDIA,INTEL" (-v = blacklist) (for exemple)
+	MyCard="$(POL_Wine_DetectCard)"
+	
+	if [ ! "$(printf "$1" | grep "$MyCard" $2)" = "" ]; then
+		POL_SetupWindow_message "Your video card ($MyCard) has not been tested with $TITLE. Don't hesitate to send us feedbacks, so we can improve $APPLICATION_TITLE" "$TITLE"
+	fi
+}
+
+POL_SimpleMessage ()
+{
+	# Shows a text box
+	# Usage: POL_SetupWindow_textbox [message] [title] [default value]
+	# Result is sent in $APP_ANSWER variable
+
+	echo "$POL_COOKIE	SimpleMessage	$(POL_Untab "$1")" | ncs "$POL_HOST" "$POL_PORT"
+}
+
+POL_SetupWindow_SetID()
+{
+	echo "$POL_COOKIE	POL_SetupWindow_SetID	$$	$1" | ncs "$POL_HOST" "$POL_PORT"	
+}
+
+POL_SetupWindow_UnsetID()
+{
+	echo "$POL_COOKIE	POL_SetupWindow_UnsetID	$$" | ncs "$POL_HOST" "$POL_PORT"	
+}

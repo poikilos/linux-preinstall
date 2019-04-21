@@ -1,0 +1,111 @@
+#!/bin/bash
+
+# Copyright (C) 2007-2010 PlayOnLinux Team
+# Copyright (C) 2007-2011 Pâris Quentin
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA. 
+
+# PlayOnLinux bug report script
+[ "$PLAYONLINUX" = "" ] && exit 0
+source "$PLAYONLINUX/lib/sources"
+
+[ "$POL_OS" == "Linux" ] && TRACKER="1"
+[ "$POL_OS" == "Mac" ] && TRACKER="4"
+
+# $1 = Nom de l'application
+#export TITLE="$1"
+export POL_SCRIPT_FAILED="NO" # Sinon on va tourner en rond
+
+POL_DEBUG_TITLE="$(eval_gettext "Report a bug")"
+export TITLE="$POL_DEBUG_TITLE"
+
+POL_SetupWindow_Init
+
+POL_SetupWindow_free_presentation "$POL_DEBUG_TITLE" "$(eval_gettext "This wizard will help you to report a bug about an officially supported program.")\n\n$(eval_gettext "Please give the more details as you can, otherwise, it will be very difficult to help you")"
+
+if [ "$POL_UPTODATE" = "FALSE" ];
+then
+	POL_SetupWindow_message "$(eval_gettext 'Your $APPLICATION_TITLE version is not up to date.\nYou must update $APPLICATION_TITLE before sending a bug report.\nThank you')" "$TITLE"
+	POL_SetupWindow_Close
+	exit 0
+fi
+if [ "$LOGTITLE" = "" ]
+then
+POL_SetupWindow_menu_num "$(eval_gettext "What kind of problem do you have?")" "$POL_DEBUG_TITLE" "$(eval_gettext 'My problem concerns $APPLICATION_TITLE itself')~$(eval_gettext "I have a problem with a software")" "~"
+PROBLEM_TYPE="$APP_ANSWER"
+if [ "$PROBLEM_TYPE" = "1" ]
+then
+	LNG_NO_JOIN="$(eval_gettext "Don't join any log file")"
+	LIST="$LNG_NO_JOIN"
+	cd "$POL_USER_ROOT/logs"
+	LNG_MANUAL="$(eval_gettext 'Manual installation')"
+	LNG_AUTOMATIC="$(eval_gettext 'Automatic installation')"
+	for file in *
+	do
+		case "$file" in
+			"$LNG_MANUAL"*|"Automatic installation"|"$LNG_AUTOMATIC"*)
+				;;
+			*)
+				LIST="$LIST~$file"
+				;;
+		esac
+	done
+	POL_SetupWindow_menu "$(eval_gettext "Choose the log file corresponding to your software.")" "$POL_DEBUG_TITLE" "$LIST" "~"
+	[ "$APP_ANSWER" = "$LNG_NO_JOIN" ] || LOGTITLE="$APP_ANSWER"
+fi
+fi
+POL_SetupWindow_textbox "$(eval_gettext "Please give a very short description (title, english only)")" "$POL_DEBUG_TITLE"
+BUGTITLE="$APP_ANSWER"
+TEMPLATE="- What were you doing when the problem occurred?- What did you expect?- What happened instead?- Anything else to report?"
+POL_SetupWindow_textbox_multiline "$(eval_gettext "Please explain your problem clearly (english only):")" "$POL_DEBUG_TITLE" "$TEMPLATE"
+
+if [ -z "$BUGTITLE" -o -z "$APP_ANSWER" -o "$APP_ANSWER" = "$TEMPLATE" ]
+then
+	POL_SetupWindow_message "$(eval_gettext 'Sorry, we need a detailed description.')" "$TITLE"
+	POL_SetupWindow_Close
+fi
+
+DESCRIPTION="$APP_ANSWER"
+	
+POL_Website_login
+POL_Website_Init
+DESCRIPTION="$DESCRIPTION"
+
+BUGTITLE="$BUGTITLE"
+SCRIPTTITLE="$LOGTITLE"
+
+POL_Website_Request "http://www.playonlinux.com/bugs/getScriptTrackerName.php?id=$SCRIPTTITLE"
+
+TrackerId="$(POL_Website_Result)"
+
+if [ "$TrackerId" = "0" ]; then
+	POL_SetupWindow_message "Error! This script seems to be no longer existing in our database" "$TITLE"
+else
+	
+	#POL_Website_Request "http://bugs.playonlinux.com/en/new-$TRACKER.html" "priority=2&tracker=$TrackerId&title=$BUGTITLE&message=$DESCRIPTION&submit=Send&just_return_id=1"
+	if [ "$LOGTITLE" = "" ]
+	then
+		POL_Website_curl "http://bugs.playonlinux.com/en/new-$TRACKER.html" -F priority=2 -F "tracker=$TrackerId" -F title="$BUGTITLE" -F message="$DESCRIPTION" -F submit=Send -F just_return_id=1
+	else
+		POL_Website_curl "http://bugs.playonlinux.com/en/new-$TRACKER.html" -F priority=2 -F "tracker=$TrackerId" -F title="$BUGTITLE" -F message="$DESCRIPTION" -F submit=Send -F just_return_id=1 -F bugfile="@$POL_USER_ROOT/logs/$LOGTITLE/$LOGTITLE.log"
+	fi
+	BugURL="$(POL_Website_Result)"
+	POL_Website_Close
+	POL_Website_logout
+	POL_SetupWindow_message "$(eval_gettext "Thank you !\n\nYour report has been sent.\n\nWe will do our best to send you an answer by mail very soon")" "$TITLE"
+	POL_Open "$BugURL"
+fi
+POL_SetupWindow_Close
+

@@ -1,0 +1,56 @@
+#!/bin/bash
+
+# Copyright (C) 2007-2010 PlayOnLinux Team
+# Copyright (C) 2011 Pâris Quentin
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA. 
+
+# This is the startup script (after POL server)
+
+[ "$PLAYONLINUX" = "" ] && exit 0
+[ "$POL_PORT" = "0" ] && exit 1 # I need the server here
+
+source "$PLAYONLINUX/lib/sources" 
+
+
+# Plugins
+install_plugins
+
+# Debian
+[ "$DEBIAN_PACKAGE" = "TRUE" ] && install_debfonts
+
+if [ ! "$(POL_Config_Read FIRST_USE)" = "TRUE" ]; then
+	bash "$PLAYONLINUX/bash/first_use"
+elif [ "$POL_OS" = "Mac" -a ! -e "/Applications/Utilities/XQuartz.app" -a "$OSX_VERSION" != "11" ]; then
+	bash "$PLAYONLINUX/bash/first_use"
+elif [ "$POL_OS" = "Mac" ]; then
+	if [ "$OSX_VERSION" = "11" -a "$OSX_SUB_VERSION" -gt "4" ] || [ "$OSX_VERSION" = "12" -a "$OSX_SUB_VERSION" -gt "1" ]; then
+		# XQuartz 2.7.4 is needed here... See http://bugs.winehq.org/show_bug.cgi?id=31751
+		XVERSION="$(cat "/Applications/Utilities/XQuartz.app/Contents/Info.plist" | grep -A1 "<key>CFBundleShortVersionString</key>" | tail -n1 | cut -d '>' -f2 | cut -d '<' -f1)"
+		if VersionLower "$XVERSION" "2.7.4"; then
+			bash "$PLAYONLINUX/bash/first_use"
+		fi
+	fi
+fi 
+
+if [ "$(POL_Config_Read GECKO_INSTALLED)" = "" ]; then
+	POL_Config_Write GECKO_INSTALLED TRUE
+	bash "$PLAYONLINUX/bash/install_gecko"
+fi
+
+if [ "$(POL_Config_Read MONO_INSTALLED)" = "" ]; then
+	POL_Config_Write MONO_INSTALLED TRUE
+	bash "$PLAYONLINUX/bash/install_mono"
+fi
